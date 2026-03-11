@@ -5,7 +5,44 @@ import os
 app = Flask(__name__)
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-DATA_FILE = os.path.join(BASE_DIR, "contexts.json")
+CONFIG_FILE = os.path.join(BASE_DIR, "launch-config.ini")
+
+
+def read_simple_config(path):
+    config = {}
+    if not os.path.exists(path):
+        return config
+
+    with open(path, "r", encoding="utf-8") as f:
+        for raw_line in f:
+            line = raw_line.strip()
+            if not line or line.startswith("#") or line.startswith(";"):
+                continue
+            if "=" not in line:
+                continue
+            key, value = line.split("=", 1)
+            config[key.strip().lower()] = value.strip()
+    return config
+
+
+def resolve_data_file():
+    config = read_simple_config(CONFIG_FILE)
+    configured = config.get("data_file", "")
+    if configured:
+        if os.path.isabs(configured):
+            return configured
+        return os.path.join(BASE_DIR, configured)
+
+    preferred = os.path.join(BASE_DIR, "prompt_library.json")
+    legacy = os.path.join(BASE_DIR, "contexts.json")
+    if os.path.exists(preferred):
+        return preferred
+    if os.path.exists(legacy):
+        return legacy
+    return preferred
+
+
+DATA_FILE = resolve_data_file()
 
 def load_data():
     if not os.path.exists(DATA_FILE):

@@ -13,3 +13,5 @@ build/
 *.log
 
 contexts.json
+prompt_library.json
+launch-config.ini
