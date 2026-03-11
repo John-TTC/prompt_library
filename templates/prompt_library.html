@@ -1,0 +1,1160 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Prompt Library</title>
+  <style>
+    :root {
+      --bg: #0f172a;
+      --panel: #111827;
+      --panel-2: #1f2937;
+      --text: #e5e7eb;
+      --muted: #9ca3af;
+      --accent: #60a5fa;
+      --danger: #ef4444;
+      --border: #374151;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
+      background: linear-gradient(180deg, #0b1020 0%, #0f172a 100%);
+      color: var(--text);
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .app-header {
+      display: grid;
+      grid-template-columns: 1fr auto 1fr;
+      gap: 10px;
+      align-items: center;
+      padding: 14px 18px;
+      border-bottom: 1px solid var(--border);
+      background: rgba(17, 24, 39, 0.9);
+      backdrop-filter: blur(4px);
+      position: sticky;
+      top: 0;
+      z-index: 2;
+      width: min(920px, calc(100% - 20px));
+      margin: 0 auto;
+    }
+
+    .header-spacer { grid-column: 1; }
+
+    .header-title-wrap {
+      display: flex;
+      flex-direction: column;
+      gap: 3px;
+      align-items: center;
+      text-align: center;
+      grid-column: 2;
+      justify-self: center;
+    }
+
+    .header-title {
+      margin: 0;
+      font-size: 24px;
+      font-weight: 600;
+    }
+
+    .header-subtitle {
+      margin: 0;
+      font-size: 14px;
+      color: var(--muted);
+    }
+
+    .header-actions {
+      grid-column: 3;
+      justify-self: end;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      align-items: stretch;
+    }
+
+    .profile-btn {
+      min-width: 88px;
+      text-align: center;
+    }
+
+    .profile-btn[aria-pressed="true"] {
+      background: #1e3a8a;
+      border-color: #3b82f6;
+      box-shadow: inset 0 0 0 1px rgba(147, 197, 253, 0.35);
+    }
+
+    button {
+      border: 1px solid var(--border);
+      background: var(--panel-2);
+      color: var(--text);
+      border-radius: 8px;
+      padding: 8px 12px;
+      cursor: pointer;
+      transition: all 0.16s ease-in-out;
+      font-size: 13px;
+    }
+
+    button:hover {
+      border-color: var(--accent);
+      background: #283548;
+    }
+
+    button:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+
+    .btn-primary {
+      background: #1d4ed8;
+      border-color: #2563eb;
+    }
+
+    .btn-primary:hover {
+      background: #1e40af;
+      border-color: #3b82f6;
+    }
+
+    .status {
+      padding: 8px 18px;
+      border-bottom: 1px solid rgba(55, 65, 81, 0.6);
+      min-height: 30px;
+      width: min(920px, calc(100% - 20px));
+      margin: 0 auto;
+    }
+
+    .status-description {
+      font-size: 12px;
+      color: var(--muted);
+      line-height: 1.3;
+      text-align: center;
+    }
+
+    .list-status {
+      font-size: 12px;
+      color: #93c5fd;
+      min-height: 22px;
+      padding: 8px 14px;
+      border-bottom: 1px solid rgba(107, 114, 128, 0.55);
+      flex-shrink: 0;
+      display: flex;
+      align-items: center;
+      justify-content: flex-start;
+      gap: 10px;
+    }
+
+    .status-text {
+      min-height: 16px;
+      line-height: 1.3;
+    }
+
+    .status-undo {
+      padding: 4px 8px;
+      font-size: 11px;
+      border-radius: 6px;
+    }
+
+    .toast {
+      position: fixed;
+      background: rgba(15, 23, 42, 0.95);
+      border: 1px solid #475569;
+      color: #e2e8f0;
+      padding: 8px 10px;
+      border-radius: 8px;
+      font-size: 12px;
+      max-width: min(420px, 80vw);
+      box-shadow: 0 8px 20px rgba(2, 6, 23, 0.35);
+      opacity: 0;
+      transform: translateY(6px);
+      transition: opacity 0.18s ease, transform 0.18s ease;
+      z-index: 30;
+      pointer-events: none;
+    }
+
+    .toast.show {
+      opacity: 1;
+      transform: translateY(0);
+    }
+
+    .toast.error {
+      border-color: #b91c1c;
+      color: #fecaca;
+    }
+
+    .layout {
+      display: grid;
+      grid-template-columns: minmax(320px, 820px);
+      justify-content: center;
+      padding: 16px;
+      min-height: calc(100vh - 105px);
+    }
+
+    .list-panel {
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      background: rgba(17, 24, 39, 0.88);
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+      max-height: calc(100vh - 150px);
+      min-height: 300px;
+    }
+
+    .list-panel-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 12px 14px;
+      border-bottom: 1px solid var(--border);
+      font-size: 13px;
+      color: var(--muted);
+      flex-shrink: 0;
+    }
+
+    .blocks-scroll {
+      overflow: auto;
+      padding: 8px 10px 14px;
+      flex: 1;
+    }
+
+    .block-card {
+      border: 1px solid #6b7280;
+      border-radius: 10px;
+      margin-top: 10px;
+      background: #374151;
+      overflow: hidden;
+      cursor: grab;
+      transition: box-shadow 0.12s ease, opacity 0.12s ease;
+    }
+
+    .block-card.dragging {
+      opacity: 0.55;
+      cursor: grabbing;
+      box-shadow: 0 0 0 2px rgba(147, 197, 253, 0.7);
+    }
+
+    .block-card.drop-before {
+      box-shadow: inset 0 3px 0 #93c5fd;
+    }
+
+    .block-card.drop-after {
+      box-shadow: inset 0 -3px 0 #93c5fd;
+    }
+
+    .block-card:first-child {
+      margin-top: 0;
+    }
+
+    .block-header {
+      display: grid;
+      grid-template-columns: auto minmax(0, 1fr) auto;
+      gap: 12px;
+      padding: 10px 12px 8px;
+      align-items: start;
+    }
+
+    .block-title-wrap {
+      min-width: 0;
+    }
+
+    .block-title {
+      margin: 0;
+      font-size: 15px;
+      font-weight: 600;
+      word-break: break-word;
+    }
+
+    .block-description {
+      margin: 6px 0 0;
+      color: #cbd5e1;
+      font-size: 13px;
+      line-height: 1.35;
+      max-width: 680px;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+
+    .row-actions {
+      display: flex;
+      gap: 6px;
+      align-items: center;
+      justify-self: end;
+      align-self: start;
+      flex-wrap: nowrap;
+    }
+
+    .row-actions button {
+      padding: 6px 10px;
+      font-size: 12px;
+    }
+
+    .btn-danger:hover {
+      border-color: #f87171;
+      color: #fecaca;
+    }
+
+    .arrow-btn {
+      width: 32px;
+      height: 32px;
+      display: inline-flex;
+      justify-content: center;
+      align-items: center;
+      font-size: 14px;
+      line-height: 1;
+      border-radius: 8px;
+      user-select: none;
+    }
+
+    .arrow-btn[aria-expanded="true"] {
+      background: #1e3a8a;
+      border-color: #3b82f6;
+    }
+
+    .context-body {
+      max-height: 0;
+      overflow: hidden;
+      transition: max-height 0.2s ease;
+      border-top: 1px solid transparent;
+    }
+
+    .context-body.open {
+      max-height: 340px;
+      border-top-color: var(--border);
+    }
+
+    .context-body-inner {
+      padding: 0 12px 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .context-collapse-hitarea {
+      height: 4px;
+      width: 100%;
+    }
+
+    .context-text {
+      background: #030712;
+      border: 1px solid #1f2937;
+      border-radius: 8px;
+      color: #d1d5db;
+      padding: 10px;
+      font-family: Consolas, "Courier New", monospace;
+      white-space: pre-wrap;
+      overflow: auto;
+      max-height: 220px;
+      font-size: 12px;
+      line-height: 1.4;
+    }
+
+    .empty-state {
+      color: var(--muted);
+      border: 1px dashed var(--border);
+      border-radius: 8px;
+      padding: 18px;
+      text-align: center;
+      margin-top: 8px;
+      font-size: 14px;
+    }
+
+    dialog {
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      background: #0f172a;
+      color: var(--text);
+      width: min(760px, 92vw);
+      padding: 0;
+    }
+
+    dialog::backdrop {
+      background: rgba(2, 6, 23, 0.6);
+      backdrop-filter: blur(2px);
+    }
+
+    .dialog-content {
+      padding: 14px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+
+    .dialog-title {
+      margin: 0;
+      font-size: 18px;
+    }
+
+    label {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      font-size: 13px;
+    }
+
+    input,
+    textarea {
+      width: 100%;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: #111827;
+      color: var(--text);
+      padding: 8px 10px;
+      font-family: inherit;
+      font-size: 14px;
+      resize: vertical;
+    }
+
+    textarea.context-input {
+      min-height: 180px;
+      font-family: Consolas, "Courier New", monospace;
+      font-size: 12px;
+    }
+
+    .dialog-actions {
+      display: flex;
+      justify-content: flex-end;
+      gap: 8px;
+      margin-top: 8px;
+      padding-top: 8px;
+      border-top: 1px solid var(--border);
+    }
+
+    @media (max-width: 760px) {
+      .app-header { grid-template-columns: 1fr; }
+      .header-spacer { display: none; }
+      .header-title-wrap { grid-column: 1; }
+      .header-actions {
+        grid-column: 1;
+        justify-self: center;
+      }
+      .layout { grid-template-columns: 1fr; }
+      .list-panel { max-height: unset; }
+    }
+  </style>
+</head>
+<body>
+  <header class="app-header">
+    <div class="header-spacer" aria-hidden="true"></div>
+    <div class="header-title-wrap">
+      <h1 class="header-title">Prompt Library</h1>
+      <p class="header-subtitle">Manages your favorite LLM session directives</p>
+    </div>
+    <div class="header-actions">
+      <button id="btnProfileJohn" class="profile-btn" type="button" aria-pressed="true">John</button>
+      <button id="btnProfileKathy" class="profile-btn" type="button" aria-pressed="false">Kathy</button>
+    </div>
+  </header>
+
+  <div class="status">
+    <div class="status-description">
+      Allows you to save and retrieve re-usable context blocks for quick paste into LLM sessions in order to establish consistent session context
+    </div>
+  </div>
+
+  <main class="layout">
+    <section class="list-panel">
+      <div class="list-panel-header">
+        <span id="countLabel">0 contexts</span>
+        <button id="btnAdd" class="btn-primary">+ New Context</button>
+      </div>
+      <div id="statusMessage" class="list-status">
+        <span id="statusText" class="status-text"></span>
+        <button id="btnUndoStatus" class="status-undo" type="button" hidden>Undo</button>
+      </div>
+      <div id="blocksContainer" class="blocks-scroll"></div>
+    </section>
+  </main>
+
+  <dialog id="contextDialog">
+    <form id="contextForm" method="dialog" class="dialog-content">
+      <h2 id="dialogTitle" class="dialog-title">New Context Block</h2>
+
+      <label>
+        Name
+        <input id="nameInput" name="name" maxlength="120" required />
+      </label>
+
+      <label>
+        Description
+        <textarea id="descriptionInput" name="description" rows="4" maxlength="800" required></textarea>
+      </label>
+
+      <label>
+        Full Context Block
+        <textarea id="contextInput" class="context-input" name="context" required></textarea>
+      </label>
+
+      <div class="dialog-actions">
+        <button type="button" id="btnCancelDialog">Cancel</button>
+        <button type="submit" class="btn-primary" id="btnSaveDialog">Save</button>
+      </div>
+    </form>
+  </dialog>
+
+  <script>
+    (() => {
+      "use strict";
+
+      const dom = {
+        statusText: document.getElementById("statusText"),
+        btnUndoStatus: document.getElementById("btnUndoStatus"),
+        countLabel: document.getElementById("countLabel"),
+        blocksContainer: document.getElementById("blocksContainer"),
+        btnAdd: document.getElementById("btnAdd"),
+        contextDialog: document.getElementById("contextDialog"),
+        contextForm: document.getElementById("contextForm"),
+        dialogTitle: document.getElementById("dialogTitle"),
+        nameInput: document.getElementById("nameInput"),
+        descriptionInput: document.getElementById("descriptionInput"),
+        contextInput: document.getElementById("contextInput"),
+        btnCancelDialog: document.getElementById("btnCancelDialog"),
+        btnProfileJohn: document.getElementById("btnProfileJohn"),
+        btnProfileKathy: document.getElementById("btnProfileKathy"),
+      };
+
+      const state = {
+        profiles: {
+          john: [],
+          kathy: [],
+        },
+        activeProfile: "john",
+        editingId: null,
+        undoSnapshot: null,
+        undoStatusMessage: "",
+      };
+
+      const dragState = {
+        draggedId: null,
+      };
+
+      const PROFILE_STORAGE_KEY = "promptLibrary.activeProfile";
+
+      async function loadFromServer() {
+        const response = await fetch("/data", { cache: "no-store" });
+        if (!response.ok) throw new Error("Load failed");
+        const parsed = await response.json();
+        const hasUsersObject =
+          parsed &&
+          typeof parsed === "object" &&
+          parsed.users &&
+          typeof parsed.users === "object";
+
+        const johnBlocks = hasUsersObject
+          ? parsed.users.john
+          : parsed && typeof parsed === "object"
+            ? parsed.blocks
+            : [];
+        const kathyBlocks = hasUsersObject ? parsed.users.kathy : [];
+
+        state.profiles.john = sanitizeLoadedBlocks(johnBlocks);
+        state.profiles.kathy = sanitizeLoadedBlocks(kathyBlocks);
+      }
+
+      async function saveToServer() {
+        const response = await fetch("/data", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(getPayload()),
+        });
+        if (!response.ok) throw new Error("Save failed");
+      }
+
+      function cloneBlocks(blocks) {
+        return blocks.map((block) => ({ ...block }));
+      }
+
+      function withReindexedOrder(blocks) {
+        return blocks.map((block, idx) => ({
+          ...block,
+          order: idx,
+        }));
+      }
+
+      function getActiveBlocks() {
+        return state.profiles[state.activeProfile];
+      }
+
+      function setActiveBlocks(blocks) {
+        state.profiles[state.activeProfile] = blocks;
+      }
+
+      function getActiveProfileLabel() {
+        return state.activeProfile === "john" ? "John" : "Kathy";
+      }
+
+      function updateProfileButtons() {
+        const isJohn = state.activeProfile === "john";
+        dom.btnProfileJohn.setAttribute("aria-pressed", String(isJohn));
+        dom.btnProfileKathy.setAttribute("aria-pressed", String(!isJohn));
+      }
+
+      function saveActiveProfileLocal() {
+        try {
+          window.localStorage.setItem(PROFILE_STORAGE_KEY, state.activeProfile);
+        } catch (_err) {
+          // Ignore storage failures (private mode / blocked storage).
+        }
+      }
+
+      function loadActiveProfileLocal() {
+        try {
+          const saved = window.localStorage.getItem(PROFILE_STORAGE_KEY);
+          if (saved === "john" || saved === "kathy") {
+            state.activeProfile = saved;
+          }
+        } catch (_err) {
+          // Ignore storage failures and keep default profile.
+        }
+      }
+
+      function switchProfile(profileId) {
+        if (profileId !== "john" && profileId !== "kathy") return;
+        if (state.activeProfile === profileId) return;
+        state.activeProfile = profileId;
+        state.editingId = null;
+        clearUndoSnapshot();
+        if (dom.contextDialog.open) {
+          closeDialog();
+        }
+        updateProfileButtons();
+        saveActiveProfileLocal();
+        render();
+        setStatus(`Viewing ${getActiveProfileLabel()}'s contexts`);
+      }
+
+      function setUndoSnapshot(snapshot, undoStatusMessage) {
+        state.undoSnapshot = snapshot && snapshot.length >= 0 ? snapshot : null;
+        state.undoStatusMessage = undoStatusMessage || "Undid last action";
+        dom.btnUndoStatus.hidden = !state.undoSnapshot;
+      }
+
+      function clearUndoSnapshot() {
+        state.undoSnapshot = null;
+        state.undoStatusMessage = "";
+        dom.btnUndoStatus.hidden = true;
+      }
+
+      function setStatus(message, isError = false) {
+        const normalizedMessage =
+          typeof message === "string" ? message.replace(/\.$/, "") : "";
+        dom.statusText.textContent = normalizedMessage;
+        dom.statusText.style.color = isError ? "#fca5a5" : "#93c5fd";
+      }
+
+      function truncateStatusName(name, maxLen = 30) {
+        const safeName = typeof name === "string" ? name : "";
+        if (safeName.length <= maxLen) return safeName;
+        return `${safeName.slice(0, maxLen)}...`;
+      }
+
+      function generateId() {
+        return (
+          "ctx-" +
+          Date.now().toString(36) +
+          "-" +
+          Math.random().toString(36).slice(2, 7)
+        );
+      }
+
+      function nowIso() {
+        return new Date().toISOString();
+      }
+
+      function sanitizeLoadedBlocks(value) {
+        if (!Array.isArray(value)) return [];
+        const cleaned = [];
+        for (const entry of value) {
+          if (!entry || typeof entry !== "object") continue;
+          const name = typeof entry.name === "string" ? entry.name.trim() : "";
+          const description =
+            typeof entry.description === "string" ? entry.description.trim() : "";
+          const contextText =
+            typeof entry.contextText === "string" ? entry.contextText : "";
+          if (!name || !description || !contextText.trim()) continue;
+
+          cleaned.push({
+            id: typeof entry.id === "string" ? entry.id : generateId(),
+            name,
+            description,
+            contextText,
+            createdAt:
+              typeof entry.createdAt === "string" ? entry.createdAt : nowIso(),
+            updatedAt:
+              typeof entry.updatedAt === "string" ? entry.updatedAt : nowIso(),
+            order:
+              typeof entry.order === "number" && Number.isFinite(entry.order)
+                ? entry.order
+                : cleaned.length,
+          });
+        }
+        cleaned.sort((a, b) => a.order - b.order);
+        return cleaned;
+      }
+
+      function getPayload() {
+        return {
+          schemaVersion: 2,
+          exportedAt: nowIso(),
+          users: {
+            john: withReindexedOrder(state.profiles.john),
+            kathy: withReindexedOrder(state.profiles.kathy),
+          },
+        };
+      }
+
+      function updateCountLabel() {
+        const count = getActiveBlocks().length;
+        const label = count === 1 ? "1 context" : `${count} contexts`;
+        dom.countLabel.textContent = `${label} (${getActiveProfileLabel()})`;
+      }
+
+      function createBlockElement(block) {
+        const card = document.createElement("article");
+        card.className = "block-card";
+        card.dataset.id = block.id;
+        card.draggable = true;
+
+        const header = document.createElement("div");
+        header.className = "block-header";
+
+        const titleWrap = document.createElement("div");
+        titleWrap.className = "block-title-wrap";
+        const title = document.createElement("h3");
+        title.className = "block-title";
+        title.textContent = block.name;
+
+        const description = document.createElement("p");
+        description.className = "block-description";
+        description.textContent = block.description;
+
+        titleWrap.appendChild(title);
+        titleWrap.appendChild(description);
+
+        const arrowBtn = document.createElement("button");
+        arrowBtn.className = "arrow-btn";
+        arrowBtn.type = "button";
+        arrowBtn.draggable = false;
+        arrowBtn.title = "Expand / Collapse";
+        arrowBtn.setAttribute("aria-expanded", "false");
+        arrowBtn.innerHTML = "&#9662;";
+
+        header.appendChild(arrowBtn);
+        header.appendChild(titleWrap);
+
+        const rowActions = document.createElement("div");
+        rowActions.className = "row-actions";
+
+        const quickCopyBtn = document.createElement("button");
+        quickCopyBtn.type = "button";
+        quickCopyBtn.draggable = false;
+        quickCopyBtn.textContent = "Copy";
+        quickCopyBtn.title = "Copy full context to clipboard";
+
+        const editBtn = document.createElement("button");
+        editBtn.type = "button";
+        editBtn.draggable = false;
+        editBtn.textContent = "Edit";
+
+        const deleteBtn = document.createElement("button");
+        deleteBtn.type = "button";
+        deleteBtn.draggable = false;
+        deleteBtn.className = "btn-danger";
+        deleteBtn.textContent = "Delete";
+
+        rowActions.appendChild(quickCopyBtn);
+        rowActions.appendChild(editBtn);
+        rowActions.appendChild(deleteBtn);
+        header.appendChild(rowActions);
+
+        const body = document.createElement("div");
+        body.className = "context-body";
+
+        const collapseHitarea = document.createElement("div");
+        collapseHitarea.className = "context-collapse-hitarea";
+
+        const bodyInner = document.createElement("div");
+        bodyInner.className = "context-body-inner";
+
+        const pre = document.createElement("pre");
+        pre.className = "context-text";
+        pre.textContent = block.contextText;
+
+        const copyBtn = document.createElement("button");
+        copyBtn.type = "button";
+        copyBtn.draggable = false;
+        copyBtn.textContent = "Copy to clipboard";
+
+        bodyInner.appendChild(pre);
+        bodyInner.appendChild(copyBtn);
+        body.appendChild(collapseHitarea);
+        body.appendChild(bodyInner);
+
+        function setExpanded(isOpen) {
+          body.classList.toggle("open", isOpen);
+          arrowBtn.setAttribute("aria-expanded", String(isOpen));
+          arrowBtn.innerHTML = isOpen ? "&#9652;" : "&#9662;";
+        }
+
+        arrowBtn.addEventListener("click", (event) => {
+          event.stopPropagation();
+          setExpanded(!body.classList.contains("open"));
+        });
+
+        card.addEventListener("click", (event) => {
+          const target = event.target;
+          if (!(target instanceof Element)) return;
+          if (target.closest("button")) return;
+          if (target.closest(".row-actions")) return;
+          if (target.closest(".context-body")) return;
+          setExpanded(!body.classList.contains("open"));
+        });
+
+        quickCopyBtn.addEventListener("click", (event) =>
+          copyText(block.contextText, `Copied "${block.name}" to clipboard.`, event.currentTarget)
+        );
+        copyBtn.addEventListener("click", () =>
+          copyText(block.contextText, `Copied "${block.name}" to clipboard.`, pre)
+        );
+
+        editBtn.addEventListener("click", () => openEditDialog(block.id));
+        deleteBtn.addEventListener("click", () => deleteBlock(block.id));
+
+        card.addEventListener("dragstart", (event) => {
+          if (event.target && event.target.closest("button")) {
+            event.preventDefault();
+            return;
+          }
+          dragState.draggedId = block.id;
+          card.classList.add("dragging");
+          if (event.dataTransfer) {
+            event.dataTransfer.effectAllowed = "move";
+            event.dataTransfer.setData("text/plain", block.id);
+          }
+        });
+
+        card.addEventListener("dragover", (event) => {
+          if (!dragState.draggedId || dragState.draggedId === block.id) return;
+          event.preventDefault();
+          if (event.dataTransfer) event.dataTransfer.dropEffect = "move";
+          const rect = card.getBoundingClientRect();
+          const insertBefore = event.clientY < rect.top + rect.height / 2;
+          updateDropMarker(card, insertBefore);
+        });
+
+        card.addEventListener("dragleave", (event) => {
+          if (event.currentTarget !== card) return;
+          const related = event.relatedTarget;
+          if (related && card.contains(related)) return;
+          card.classList.remove("drop-before", "drop-after");
+        });
+
+        card.addEventListener("drop", (event) => {
+          if (!dragState.draggedId || dragState.draggedId === block.id) return;
+          event.preventDefault();
+          const rect = card.getBoundingClientRect();
+          const insertBefore = event.clientY < rect.top + rect.height / 2;
+          moveBlock(dragState.draggedId, block.id, insertBefore);
+          clearDropMarkers();
+        });
+
+        card.addEventListener("dragend", () => {
+          dragState.draggedId = null;
+          card.classList.remove("dragging");
+          clearDropMarkers();
+        });
+
+        card.appendChild(header);
+        card.appendChild(body);
+        return card;
+      }
+
+      function render() {
+        dom.blocksContainer.innerHTML = "";
+        updateCountLabel();
+        const activeBlocks = getActiveBlocks();
+
+        if (!activeBlocks.length) {
+          const empty = document.createElement("div");
+          empty.className = "empty-state";
+          empty.textContent =
+            `No context blocks yet for ${getActiveProfileLabel()}. Use + New Context to create one.`;
+          dom.blocksContainer.appendChild(empty);
+          return;
+        }
+
+        for (const block of activeBlocks) {
+          dom.blocksContainer.appendChild(createBlockElement(block));
+        }
+      }
+
+      function clearDropMarkers() {
+        const marked = dom.blocksContainer.querySelectorAll(".drop-before, .drop-after");
+        for (const node of marked) {
+          node.classList.remove("drop-before", "drop-after");
+        }
+      }
+
+      function updateDropMarker(card, insertBefore) {
+        clearDropMarkers();
+        card.classList.add(insertBefore ? "drop-before" : "drop-after");
+      }
+
+      async function persistWithStatus(successMessage, errorMessage = "Autosave failed: Server may not be running") {
+        try {
+          await saveToServer();
+          setStatus(successMessage);
+        } catch (_err) {
+          setStatus(errorMessage, true);
+        }
+      }
+
+      function moveBlock(draggedId, targetId, insertBefore) {
+        if (draggedId === targetId) return;
+        const activeBlocks = getActiveBlocks();
+
+        const dragIndex = activeBlocks.findIndex((b) => b.id === draggedId);
+        const targetIndex = activeBlocks.findIndex((b) => b.id === targetId);
+        if (dragIndex < 0 || targetIndex < 0) return;
+
+        const previousBlocks = cloneBlocks(activeBlocks);
+        const [draggedBlock] = activeBlocks.splice(dragIndex, 1);
+        const liveTargetIndex = activeBlocks.findIndex((b) => b.id === targetId);
+        const insertIndex = insertBefore ? liveTargetIndex : liveTargetIndex + 1;
+        activeBlocks.splice(insertIndex, 0, draggedBlock);
+        setActiveBlocks(activeBlocks);
+
+        setUndoSnapshot(previousBlocks, "Previous order restored");
+        render();
+        void persistWithStatus(
+          `Changed order of "${truncateStatusName(draggedBlock.name)}"`
+        );
+      }
+
+      async function copyText(text, successMsg, anchorEl = null) {
+        try {
+          await navigator.clipboard.writeText(text);
+          showToast(successMsg, false, 1400, anchorEl);
+        } catch (_err) {
+          const ok = fallbackCopyText(text);
+          if (ok) showToast(successMsg, false, 1400, anchorEl);
+          else showToast("Clipboard failed. Copy manually from expanded panel.", true, 1600, anchorEl);
+        }
+      }
+
+      function showToast(message, isError = false, durationMs = 1400, anchorEl = null) {
+        const toast = document.createElement("div");
+        toast.className = `toast${isError ? " error" : ""}`;
+        toast.textContent = message;
+        document.body.appendChild(toast);
+        positionToast(toast, anchorEl);
+        requestAnimationFrame(() => toast.classList.add("show"));
+        window.setTimeout(() => {
+          toast.classList.remove("show");
+          window.setTimeout(() => toast.remove(), 220);
+        }, durationMs);
+      }
+
+      function positionToast(toastEl, anchorEl) {
+        const margin = 12;
+        const viewportWidth = window.innerWidth;
+        const viewportHeight = window.innerHeight;
+        const toastRect = toastEl.getBoundingClientRect();
+
+        let left = viewportWidth - toastRect.width - 16;
+        let top = viewportHeight - toastRect.height - 16;
+
+        if (anchorEl && typeof anchorEl.getBoundingClientRect === "function") {
+          const anchorRect = anchorEl.getBoundingClientRect();
+          left = anchorRect.right - toastRect.width - 6;
+          top = anchorRect.bottom - toastRect.height - 6;
+        }
+
+        left = Math.min(Math.max(margin, left), viewportWidth - toastRect.width - margin);
+        top = Math.min(Math.max(margin, top), viewportHeight - toastRect.height - margin);
+
+        toastEl.style.left = `${left}px`;
+        toastEl.style.top = `${top}px`;
+      }
+
+      function fallbackCopyText(text) {
+        const ta = document.createElement("textarea");
+        ta.value = text;
+        ta.setAttribute("readonly", "true");
+        ta.style.position = "absolute";
+        ta.style.left = "-9999px";
+        document.body.appendChild(ta);
+        ta.select();
+
+        let ok = false;
+        try {
+          ok = document.execCommand("copy");
+        } catch (_err) {
+          ok = false;
+        }
+
+        ta.remove();
+        return ok;
+      }
+
+      function openNewDialog() {
+        state.editingId = null;
+        dom.dialogTitle.textContent = "New Context Block";
+        dom.contextForm.reset();
+        dom.contextDialog.showModal();
+        dom.nameInput.focus();
+      }
+
+      function openEditDialog(blockId) {
+        const block = getActiveBlocks().find((b) => b.id === blockId);
+        if (!block) return;
+
+        state.editingId = block.id;
+        dom.dialogTitle.textContent = "Edit Context Block";
+        dom.nameInput.value = block.name;
+        dom.descriptionInput.value = block.description;
+        dom.contextInput.value = block.contextText;
+        dom.contextDialog.showModal();
+        dom.nameInput.focus();
+      }
+
+      function closeDialog() {
+        if (dom.contextDialog.open) dom.contextDialog.close();
+      }
+
+      function upsertFromDialog() {
+        const name = dom.nameInput.value.trim();
+        const description = dom.descriptionInput.value.trim();
+        const contextText = dom.contextInput.value;
+
+        if (!name || !description || !contextText.trim()) {
+          setStatus("Name, description, and context block are required", true);
+          return;
+        }
+
+        const activeBlocks = getActiveBlocks();
+        const previousBlocks = cloneBlocks(activeBlocks);
+
+        if (state.editingId) {
+          const idx = activeBlocks.findIndex((b) => b.id === state.editingId);
+          if (idx < 0) return;
+
+          const restoredName =
+            previousBlocks[idx] && typeof previousBlocks[idx].name === "string"
+              ? previousBlocks[idx].name
+              : name;
+
+          activeBlocks[idx] = {
+            ...activeBlocks[idx],
+            name,
+            description,
+            contextText,
+            updatedAt: nowIso(),
+          };
+
+          setUndoSnapshot(
+            previousBlocks,
+            `Restored "${truncateStatusName(restoredName)}"`
+          );
+          setActiveBlocks(activeBlocks);
+          render();
+          closeDialog();
+          void persistWithStatus(`Changed "${truncateStatusName(name)}"`);
+        } else {
+          const newBlock = {
+            id: generateId(),
+            name,
+            description,
+            contextText,
+            createdAt: nowIso(),
+            updatedAt: nowIso(),
+            order: activeBlocks.length,
+          };
+
+          activeBlocks.push(newBlock);
+          setActiveBlocks(activeBlocks);
+          setUndoSnapshot(previousBlocks, "Context block removed");
+          render();
+          closeDialog();
+          void persistWithStatus(`Added "${truncateStatusName(name)}"`);
+        }
+      }
+
+      function deleteBlock(id) {
+        const activeBlocks = getActiveBlocks();
+        const block = activeBlocks.find((b) => b.id === id);
+        if (!block) return;
+
+        const ok = window.confirm(`Delete "${block.name}"?`);
+        if (!ok) return;
+
+        const previousBlocks = cloneBlocks(activeBlocks);
+        setActiveBlocks(activeBlocks.filter((b) => b.id !== id));
+
+        setUndoSnapshot(
+          previousBlocks,
+          `Restored "${truncateStatusName(block.name)}"`
+        );
+        render();
+        void persistWithStatus(`Deleted "${truncateStatusName(block.name)}"`);
+      }
+
+      async function undoLastAction() {
+        if (!state.undoSnapshot) {
+          setStatus("Nothing to undo");
+          return;
+        }
+
+        setActiveBlocks(cloneBlocks(state.undoSnapshot));
+        const undoResultMessage = state.undoStatusMessage || "Undid last action";
+
+        clearUndoSnapshot();
+        render();
+
+        try {
+          await saveToServer();
+          setStatus(undoResultMessage);
+        } catch (_err) {
+          setStatus("Autosave failed: Server may not be running", true);
+        }
+      }
+
+      function bindEvents() {
+        dom.btnAdd.addEventListener("click", openNewDialog);
+        dom.btnProfileJohn.addEventListener("click", () => switchProfile("john"));
+        dom.btnProfileKathy.addEventListener("click", () => switchProfile("kathy"));
+        dom.btnCancelDialog.addEventListener("click", closeDialog);
+        dom.contextForm.addEventListener("submit", (event) => {
+          event.preventDefault();
+          upsertFromDialog();
+        });
+        dom.btnUndoStatus.addEventListener("click", () => {
+          void undoLastAction();
+        });
+      }
+
+      async function init() {
+        bindEvents();
+        loadActiveProfileLocal();
+        updateProfileButtons();
+        try {
+          await loadFromServer();
+        } catch (_err) {
+          state.profiles.john = [];
+          state.profiles.kathy = [];
+          setStatus("Could not load from server", true);
+        }
+        render();
+        if (!dom.statusText.textContent) {
+          setStatus("");
+        }
+      }
+
+      void init();
+    })();
+  </script>
+</body>
+</html>
