@@ -80,7 +80,7 @@ open_host=192.168.x.x
 
 ## GitHub / Local Data Notes
 
-- `launch-config.ini` is ignored by git, so machine-specific settings stay local and are not included in the repo.
+- `launch-config.ini` ignored by git, so machine-specific settings stay local and are not included in the repo.
 - JSON data files are ignored by git by default, so prompt content stays local and is not included in the repo.
 - Ignored JSON filenames include `contexts.json` and `prompt_library.json`.
 

@@ -1,3 +1,4 @@
+' launches the prompt library
 Set WshShell = CreateObject("WScript.Shell")
 Set FSO = CreateObject("Scripting.FileSystemObject")
 
