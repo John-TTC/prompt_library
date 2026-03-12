@@ -46,6 +46,7 @@ listen_port=5000
 open_scheme=http
 open_host=127.0.0.1
 data_file=prompt_library.json
+users=User One,User Two
 ```
 
 Both launch methods (`start-prompt-library.vbs` and `python server.py`) use `launch-config.ini`.
@@ -56,6 +57,7 @@ Both launch methods (`start-prompt-library.vbs` and `python server.py`) use `lau
 - `open_scheme`: URL scheme (`http` by default)
 - `open_host`: host/IP to open in browser (`127.0.0.1` for local, LAN IP for intranet)
 - `data_file`: JSON file used by `server.py` (relative filename or absolute path)
+- `users`: comma-separated user names shown in the app user dropdown
 
 ## Local Network Access
 

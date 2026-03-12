@@ -1,6 +1,7 @@
 from flask import Flask, render_template, request, jsonify
 import json
 import os
+import re
 
 app = Flask(__name__)
 
@@ -44,6 +45,30 @@ def resolve_data_file():
 
 DATA_FILE = resolve_data_file()
 
+
+def slugify_user_id(label):
+    base = re.sub(r"[^a-z0-9]+", "-", label.lower()).strip("-")
+    return base or "user"
+
+
+def resolve_configured_users():
+    config = read_simple_config(CONFIG_FILE)
+    raw = config.get("users", "")
+    tokens = [part.strip() for part in raw.split(",") if part.strip()]
+
+    if not tokens:
+        return [{"id": "default", "label": "Default"}]
+
+    seen = {}
+    users = []
+    for label in tokens:
+        base_id = slugify_user_id(label)
+        next_num = seen.get(base_id, 0) + 1
+        seen[base_id] = next_num
+        user_id = base_id if next_num == 1 else f"{base_id}-{next_num}"
+        users.append({"id": user_id, "label": label})
+    return users
+
 def load_data():
     if not os.path.exists(DATA_FILE):
         return {}
@@ -67,6 +92,11 @@ def post_data():
     data = request.get_json(force=True)
     save_data(data)
     return jsonify({"ok": True})
+
+
+@app.route("/app-config", methods=["GET"])
+def get_app_config():
+    return jsonify({"users": resolve_configured_users()})
 
 @app.route("/webhook/agentmail", methods=["POST"])
 def agentmail_webhook():

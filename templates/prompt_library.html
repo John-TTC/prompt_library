@@ -40,7 +40,7 @@
       position: sticky;
       top: 0;
       z-index: 2;
-      width: min(920px, calc(100% - 20px));
+      width: min(1052px, calc(100% - 20px));
       margin: 0 auto;
     }
 
@@ -73,19 +73,23 @@
       justify-self: end;
       display: flex;
       flex-direction: column;
-      gap: 6px;
-      align-items: stretch;
+      gap: 4px;
+      align-items: flex-end;
     }
 
-    .profile-btn {
-      min-width: 88px;
-      text-align: center;
+    .user-select-label {
+      font-size: 11px;
+      color: var(--muted);
     }
 
-    .profile-btn[aria-pressed="true"] {
-      background: #1e3a8a;
-      border-color: #3b82f6;
-      box-shadow: inset 0 0 0 1px rgba(147, 197, 253, 0.35);
+    .user-select {
+      min-width: 150px;
+      padding: 6px 8px;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: var(--panel-2);
+      color: var(--text);
+      font-size: 13px;
     }
 
     button {
@@ -123,7 +127,7 @@
       padding: 8px 18px;
       border-bottom: 1px solid rgba(55, 65, 81, 0.6);
       min-height: 30px;
-      width: min(920px, calc(100% - 20px));
+      width: min(1052px, calc(100% - 20px));
       margin: 0 auto;
     }
 
@@ -187,10 +191,84 @@
 
     .layout {
       display: grid;
-      grid-template-columns: minmax(320px, 820px);
+      grid-template-columns: 220px minmax(320px, 820px);
+      gap: 12px;
       justify-content: center;
       padding: 16px;
       min-height: calc(100vh - 105px);
+    }
+
+    .groups-panel {
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      background: rgba(17, 24, 39, 0.88);
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+      max-height: calc(100vh - 150px);
+      min-height: 300px;
+    }
+
+    .groups-panel-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 12px 10px;
+      border-bottom: 1px solid var(--border);
+      font-size: 12px;
+      color: var(--muted);
+      flex-shrink: 0;
+      gap: 8px;
+    }
+
+    .groups-panel-header button {
+      padding: 5px 8px;
+      font-size: 11px;
+    }
+
+    .groups-scroll {
+      overflow: auto;
+      padding: 8px;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      flex: 1;
+    }
+
+    .group-item {
+      width: 100%;
+      text-align: left;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 10px;
+      font-size: 12px;
+      padding: 8px 10px;
+    }
+
+    .group-item.active {
+      background: #1e3a8a;
+      border-color: #3b82f6;
+      box-shadow: inset 0 0 0 1px rgba(147, 197, 253, 0.35);
+    }
+
+    .group-item.drop-target {
+      border-color: #93c5fd;
+      box-shadow: inset 0 0 0 1px rgba(147, 197, 253, 0.7);
+      background: #243244;
+    }
+
+    .group-name {
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .group-count {
+      color: var(--muted);
+      font-size: 11px;
+      flex-shrink: 0;
     }
 
     .list-panel {
@@ -213,6 +291,19 @@
       font-size: 13px;
       color: var(--muted);
       flex-shrink: 0;
+    }
+
+    .list-controls {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .list-controls input {
+      width: 230px;
+      padding: 6px 8px;
+      font-size: 12px;
+      border-radius: 6px;
     }
 
     .blocks-scroll {
@@ -276,6 +367,20 @@
       max-width: 680px;
       white-space: pre-wrap;
       word-break: break-word;
+    }
+
+    .block-meta {
+      margin-top: 7px;
+    }
+
+    .group-badge {
+      display: inline-block;
+      font-size: 11px;
+      border: 1px solid #475569;
+      border-radius: 999px;
+      padding: 2px 7px;
+      color: #cbd5e1;
+      background: rgba(15, 23, 42, 0.45);
     }
 
     .row-actions {
@@ -432,6 +537,9 @@
         justify-self: center;
       }
       .layout { grid-template-columns: 1fr; }
+      .groups-panel { max-height: 210px; min-height: 140px; }
+      .list-controls input { width: 100%; }
+      .list-panel-header { flex-direction: column; align-items: stretch; gap: 8px; }
       .list-panel { max-height: unset; }
     }
   </style>
@@ -444,8 +552,8 @@
       <p class="header-subtitle">Manages your favorite LLM session directives</p>
     </div>
     <div class="header-actions">
-      <button id="btnProfileJohn" class="profile-btn" type="button" aria-pressed="true">John</button>
-      <button id="btnProfileKathy" class="profile-btn" type="button" aria-pressed="false">Kathy</button>
+      <label class="user-select-label" for="userSelect">Active user</label>
+      <select id="userSelect" class="user-select"></select>
     </div>
   </header>
 
@@ -456,10 +564,20 @@
   </div>
 
   <main class="layout">
+    <aside class="groups-panel">
+      <div class="groups-panel-header">
+        <span>Groups</span>
+        <button id="btnAddGroup" type="button">+ Group</button>
+      </div>
+      <div id="groupsContainer" class="groups-scroll"></div>
+    </aside>
     <section class="list-panel">
       <div class="list-panel-header">
         <span id="countLabel">0 contexts</span>
-        <button id="btnAdd" class="btn-primary">+ New Context</button>
+        <div class="list-controls">
+          <input id="searchInput" type="search" placeholder="Search prompts..." />
+          <button id="btnAdd" class="btn-primary">+ New Context</button>
+        </div>
       </div>
       <div id="statusMessage" class="list-status">
         <span id="statusText" class="status-text"></span>
@@ -484,6 +602,11 @@
       </label>
 
       <label>
+        Group
+        <select id="groupSelect" name="group"></select>
+      </label>
+
+      <label>
         Full Context Block
         <textarea id="contextInput" class="context-input" name="context" required></textarea>
       </label>
@@ -504,6 +627,9 @@
         btnUndoStatus: document.getElementById("btnUndoStatus"),
         countLabel: document.getElementById("countLabel"),
         blocksContainer: document.getElementById("blocksContainer"),
+        groupsContainer: document.getElementById("groupsContainer"),
+        searchInput: document.getElementById("searchInput"),
+        btnAddGroup: document.getElementById("btnAddGroup"),
         btnAdd: document.getElementById("btnAdd"),
         contextDialog: document.getElementById("contextDialog"),
         contextForm: document.getElementById("contextForm"),
@@ -511,17 +637,23 @@
         nameInput: document.getElementById("nameInput"),
         descriptionInput: document.getElementById("descriptionInput"),
         contextInput: document.getElementById("contextInput"),
+        groupSelect: document.getElementById("groupSelect"),
         btnCancelDialog: document.getElementById("btnCancelDialog"),
-        btnProfileJohn: document.getElementById("btnProfileJohn"),
-        btnProfileKathy: document.getElementById("btnProfileKathy"),
+        userSelect: document.getElementById("userSelect"),
       };
 
+      const GROUP_ALL_ID = "__all__";
+      const DEFAULT_GROUP_ID = "group-unsorted";
+      const PROFILE_STORAGE_KEY = "promptLibrary.activeProfile";
+      const GROUP_STORAGE_KEY = "promptLibrary.activeGroups";
+
       const state = {
-        profiles: {
-          john: [],
-          kathy: [],
-        },
-        activeProfile: "john",
+        configuredUsers: [{ id: "default", label: "Default" }],
+        profiles: {},
+        groups: {},
+        activeProfile: "default",
+        activeGroupByProfile: {},
+        searchByProfile: {},
         editingId: null,
         undoSnapshot: null,
         undoStatusMessage: "",
@@ -531,7 +663,47 @@
         draggedId: null,
       };
 
-      const PROFILE_STORAGE_KEY = "promptLibrary.activeProfile";
+      function initProfileState(profileId) {
+        if (!state.profiles[profileId]) state.profiles[profileId] = [];
+        if (!state.groups[profileId]) {
+          state.groups[profileId] = ensureDefaultGroup([]);
+        } else {
+          state.groups[profileId] = ensureDefaultGroup(state.groups[profileId]);
+        }
+        if (!state.activeGroupByProfile[profileId]) {
+          state.activeGroupByProfile[profileId] = GROUP_ALL_ID;
+        }
+        if (typeof state.searchByProfile[profileId] !== "string") {
+          state.searchByProfile[profileId] = "";
+        }
+      }
+
+      function getActiveUserDef() {
+        return (
+          state.configuredUsers.find((user) => user.id === state.activeProfile) ||
+          state.configuredUsers[0] ||
+          { id: "default", label: "Default" }
+        );
+      }
+
+      async function loadAppConfig() {
+        const response = await fetch("/app-config", { cache: "no-store" });
+        if (!response.ok) throw new Error("Config load failed");
+        const parsed = await response.json();
+        const usersRaw =
+          parsed && Array.isArray(parsed.users) ? parsed.users : [];
+        const cleaned = [];
+        for (const entry of usersRaw) {
+          if (!entry || typeof entry !== "object") continue;
+          const id = typeof entry.id === "string" ? entry.id.trim() : "";
+          const label =
+            typeof entry.label === "string" ? entry.label.trim() : "";
+          if (!id || !label) continue;
+          cleaned.push({ id, label });
+        }
+        state.configuredUsers =
+          cleaned.length > 0 ? cleaned : [{ id: "default", label: "Default" }];
+      }
 
       async function loadFromServer() {
         const response = await fetch("/data", { cache: "no-store" });
@@ -543,15 +715,43 @@
           parsed.users &&
           typeof parsed.users === "object";
 
-        const johnBlocks = hasUsersObject
-          ? parsed.users.john
-          : parsed && typeof parsed === "object"
-            ? parsed.blocks
-            : [];
-        const kathyBlocks = hasUsersObject ? parsed.users.kathy : [];
+        const fallbackUserEntries = hasUsersObject
+          ? Object.entries(parsed.users).filter(
+              ([, value]) => value && typeof value === "object"
+            )
+          : [];
+        const usedFallbackKeys = new Set();
 
-        state.profiles.john = sanitizeLoadedBlocks(johnBlocks);
-        state.profiles.kathy = sanitizeLoadedBlocks(kathyBlocks);
+        for (const user of state.configuredUsers) {
+          initProfileState(user.id);
+          let userRaw = [];
+          if (hasUsersObject) {
+            userRaw = parsed.users[user.id];
+            if (!userRaw && user.id === "john" && parsed.users.john) {
+              userRaw = parsed.users.john;
+              usedFallbackKeys.add("john");
+            }
+            if (!userRaw && user.id === "kathy" && parsed.users.kathy) {
+              userRaw = parsed.users.kathy;
+              usedFallbackKeys.add("kathy");
+            }
+            if (!userRaw) {
+              const fallback = fallbackUserEntries.find(
+                ([key]) => !usedFallbackKeys.has(key)
+              );
+              if (fallback) {
+                userRaw = fallback[1];
+                usedFallbackKeys.add(fallback[0]);
+              }
+            }
+          } else if (parsed && typeof parsed === "object") {
+            userRaw =
+              user.id === state.configuredUsers[0].id ? parsed.blocks : [];
+          }
+          const userData = normalizeUserData(userRaw);
+          state.groups[user.id] = userData.groups;
+          state.profiles[user.id] = userData.blocks;
+        }
       }
 
       async function saveToServer() {
@@ -567,29 +767,50 @@
         return blocks.map((block) => ({ ...block }));
       }
 
-      function withReindexedOrder(blocks) {
-        return blocks.map((block, idx) => ({
-          ...block,
+      function withReindexedOrder(items) {
+        return items.map((item, idx) => ({
+          ...item,
           order: idx,
         }));
       }
 
       function getActiveBlocks() {
-        return state.profiles[state.activeProfile];
+        return state.profiles[state.activeProfile] || [];
       }
 
       function setActiveBlocks(blocks) {
         state.profiles[state.activeProfile] = blocks;
       }
 
-      function getActiveProfileLabel() {
-        return state.activeProfile === "john" ? "John" : "Kathy";
+      function getActiveGroups() {
+        return state.groups[state.activeProfile] || [];
       }
 
-      function updateProfileButtons() {
-        const isJohn = state.activeProfile === "john";
-        dom.btnProfileJohn.setAttribute("aria-pressed", String(isJohn));
-        dom.btnProfileKathy.setAttribute("aria-pressed", String(!isJohn));
+      function setActiveGroups(groups) {
+        state.groups[state.activeProfile] = groups;
+      }
+
+      function getActiveGroupId() {
+        return state.activeGroupByProfile[state.activeProfile] || GROUP_ALL_ID;
+      }
+
+      function setActiveGroupId(groupId) {
+        state.activeGroupByProfile[state.activeProfile] = groupId;
+      }
+
+      function getActiveProfileLabel() {
+        return getActiveUserDef().label;
+      }
+
+      function renderUserSelect() {
+        dom.userSelect.innerHTML = "";
+        for (const user of state.configuredUsers) {
+          const option = document.createElement("option");
+          option.value = user.id;
+          option.textContent = user.label;
+          dom.userSelect.appendChild(option);
+        }
+        dom.userSelect.value = state.activeProfile;
       }
 
       function saveActiveProfileLocal() {
@@ -603,7 +824,10 @@
       function loadActiveProfileLocal() {
         try {
           const saved = window.localStorage.getItem(PROFILE_STORAGE_KEY);
-          if (saved === "john" || saved === "kathy") {
+          if (
+            saved &&
+            state.configuredUsers.some((user) => user.id === saved)
+          ) {
             state.activeProfile = saved;
           }
         } catch (_err) {
@@ -611,19 +835,52 @@
         }
       }
 
+      function saveActiveGroupsLocal() {
+        try {
+          window.localStorage.setItem(
+            GROUP_STORAGE_KEY,
+            JSON.stringify(state.activeGroupByProfile)
+          );
+        } catch (_err) {
+          // Ignore storage failures (private mode / blocked storage).
+        }
+      }
+
+      function loadActiveGroupsLocal() {
+        try {
+          const raw = window.localStorage.getItem(GROUP_STORAGE_KEY);
+          if (!raw) return;
+          const parsed = JSON.parse(raw);
+          if (parsed && typeof parsed === "object") {
+            for (const user of state.configuredUsers) {
+              if (typeof parsed[user.id] === "string") {
+                state.activeGroupByProfile[user.id] = parsed[user.id];
+              }
+            }
+          }
+        } catch (_err) {
+          // Ignore storage failures and keep defaults.
+        }
+      }
+
       function switchProfile(profileId) {
-        if (profileId !== "john" && profileId !== "kathy") return;
+        if (!state.configuredUsers.some((user) => user.id === profileId)) return;
         if (state.activeProfile === profileId) return;
         state.activeProfile = profileId;
+        initProfileState(profileId);
         state.editingId = null;
         clearUndoSnapshot();
         if (dom.contextDialog.open) {
           closeDialog();
         }
-        updateProfileButtons();
+        ensureActiveGroupIsValid();
+        renderUserSelect();
         saveActiveProfileLocal();
+        syncSearchInputFromState();
         render();
-        setStatus(`Viewing ${getActiveProfileLabel()}'s contexts`);
+        setStatus(
+          `Viewing ${getActiveProfileLabel()}'s prompts in ${getActiveGroupLabel()}`
+        );
       }
 
       function setUndoSnapshot(snapshot, undoStatusMessage) {
@@ -651,9 +908,10 @@
         return `${safeName.slice(0, maxLen)}...`;
       }
 
-      function generateId() {
+      function generateId(prefix = "ctx") {
         return (
-          "ctx-" +
+          prefix +
+          "-" +
           Date.now().toString(36) +
           "-" +
           Math.random().toString(36).slice(2, 7)
@@ -664,8 +922,45 @@
         return new Date().toISOString();
       }
 
-      function sanitizeLoadedBlocks(value) {
+      function sanitizeLoadedGroups(value) {
         if (!Array.isArray(value)) return [];
+        const cleaned = [];
+        for (const entry of value) {
+          if (!entry || typeof entry !== "object") continue;
+          const name = typeof entry.name === "string" ? entry.name.trim() : "";
+          if (!name) continue;
+          cleaned.push({
+            id: typeof entry.id === "string" ? entry.id : generateId("grp"),
+            name,
+            createdAt:
+              typeof entry.createdAt === "string" ? entry.createdAt : nowIso(),
+            order:
+              typeof entry.order === "number" && Number.isFinite(entry.order)
+                ? entry.order
+                : cleaned.length,
+          });
+        }
+        cleaned.sort((a, b) => a.order - b.order);
+        return cleaned;
+      }
+
+      function ensureDefaultGroup(groups) {
+        const existing = groups.find((g) => g.id === DEFAULT_GROUP_ID);
+        if (existing) return groups;
+        return [
+          ...groups,
+          {
+            id: DEFAULT_GROUP_ID,
+            name: "Unsorted",
+            createdAt: nowIso(),
+            order: groups.length,
+          },
+        ];
+      }
+
+      function sanitizeLoadedBlocks(value, groups) {
+        if (!Array.isArray(value)) return [];
+        const groupIds = new Set(groups.map((g) => g.id));
         const cleaned = [];
         for (const entry of value) {
           if (!entry || typeof entry !== "object") continue;
@@ -676,11 +971,20 @@
             typeof entry.contextText === "string" ? entry.contextText : "";
           if (!name || !description || !contextText.trim()) continue;
 
+          const rawGroupId =
+            typeof entry.groupId === "string"
+              ? entry.groupId
+              : typeof entry.collectionId === "string"
+                ? entry.collectionId
+                : "";
+          const groupId = groupIds.has(rawGroupId) ? rawGroupId : DEFAULT_GROUP_ID;
+
           cleaned.push({
-            id: typeof entry.id === "string" ? entry.id : generateId(),
+            id: typeof entry.id === "string" ? entry.id : generateId("ctx"),
             name,
             description,
             contextText,
+            groupId,
             createdAt:
               typeof entry.createdAt === "string" ? entry.createdAt : nowIso(),
             updatedAt:
@@ -695,21 +999,165 @@
         return cleaned;
       }
 
+      function normalizeUserData(raw) {
+        let groupsRaw = [];
+        let blocksRaw = [];
+
+        if (Array.isArray(raw)) {
+          blocksRaw = raw;
+        } else if (raw && typeof raw === "object") {
+          if (Array.isArray(raw.groups)) groupsRaw = raw.groups;
+          if (Array.isArray(raw.blocks)) blocksRaw = raw.blocks;
+          else if (Array.isArray(raw.prompts)) blocksRaw = raw.prompts;
+        }
+
+        let groups = sanitizeLoadedGroups(groupsRaw);
+        groups = ensureDefaultGroup(groups);
+        const blocks = sanitizeLoadedBlocks(blocksRaw, groups);
+        return { groups, blocks };
+      }
+
       function getPayload() {
+        const usersPayload = {};
+        for (const user of state.configuredUsers) {
+          initProfileState(user.id);
+          usersPayload[user.id] = {
+            groups: withReindexedOrder(state.groups[user.id]),
+            blocks: withReindexedOrder(state.profiles[user.id]),
+          };
+        }
         return {
-          schemaVersion: 2,
+          schemaVersion: 3,
           exportedAt: nowIso(),
-          users: {
-            john: withReindexedOrder(state.profiles.john),
-            kathy: withReindexedOrder(state.profiles.kathy),
-          },
+          users: usersPayload,
         };
       }
 
+      function getGroupById(groupId) {
+        return getActiveGroups().find((group) => group.id === groupId) || null;
+      }
+
+      function getGroupLabel(groupId) {
+        if (groupId === GROUP_ALL_ID) return "All prompts";
+        const group = getGroupById(groupId);
+        return group ? group.name : "Unsorted";
+      }
+
+      function getActiveGroupLabel() {
+        return getGroupLabel(getActiveGroupId());
+      }
+
+      function ensureActiveGroupIsValid() {
+        const groupId = getActiveGroupId();
+        if (groupId === GROUP_ALL_ID) return;
+        const exists = getActiveGroups().some((group) => group.id === groupId);
+        if (!exists) {
+          setActiveGroupId(GROUP_ALL_ID);
+        }
+      }
+
+      function getActiveSearchTerm() {
+        return state.searchByProfile[state.activeProfile] || "";
+      }
+
+      function syncSearchInputFromState() {
+        dom.searchInput.value = getActiveSearchTerm();
+      }
+
+      function getVisibleBlocks() {
+        const allBlocks = getActiveBlocks();
+        const selectedGroupId = getActiveGroupId();
+        const query = getActiveSearchTerm().trim().toLowerCase();
+
+        return allBlocks.filter((block) => {
+          const inGroup =
+            selectedGroupId === GROUP_ALL_ID || block.groupId === selectedGroupId;
+          if (!inGroup) return false;
+          if (!query) return true;
+          return (
+            block.name.toLowerCase().includes(query) ||
+            block.description.toLowerCase().includes(query) ||
+            block.contextText.toLowerCase().includes(query)
+          );
+        });
+      }
+
       function updateCountLabel() {
-        const count = getActiveBlocks().length;
-        const label = count === 1 ? "1 context" : `${count} contexts`;
-        dom.countLabel.textContent = `${label} (${getActiveProfileLabel()})`;
+        const visibleCount = getVisibleBlocks().length;
+        const itemLabel = visibleCount === 1 ? "1 prompt" : `${visibleCount} prompts`;
+        const searchLabel = getActiveSearchTerm().trim() ? " - filtered" : "";
+        dom.countLabel.textContent =
+          `${itemLabel} in ${getActiveGroupLabel()} (${getActiveProfileLabel()})${searchLabel}`;
+      }
+
+      function renderGroups() {
+        dom.groupsContainer.innerHTML = "";
+        const allBlocksCount = getActiveBlocks().length;
+
+        const allButton = document.createElement("button");
+        allButton.type = "button";
+        allButton.className =
+          "group-item" + (getActiveGroupId() === GROUP_ALL_ID ? " active" : "");
+        allButton.innerHTML =
+          `<span class="group-name">All prompts</span><span class="group-count">${allBlocksCount}</span>`;
+        allButton.addEventListener("click", () => {
+          if (getActiveGroupId() === GROUP_ALL_ID) return;
+          setActiveGroupId(GROUP_ALL_ID);
+          saveActiveGroupsLocal();
+          render();
+          setStatus(`Showing all prompts for ${getActiveProfileLabel()}`);
+        });
+        wireGroupDropTarget(allButton, GROUP_ALL_ID);
+        dom.groupsContainer.appendChild(allButton);
+
+        for (const group of getActiveGroups()) {
+          const groupCount = getActiveBlocks().filter(
+            (block) => block.groupId === group.id
+          ).length;
+          const button = document.createElement("button");
+          button.type = "button";
+          button.className =
+            "group-item" + (getActiveGroupId() === group.id ? " active" : "");
+          button.innerHTML =
+            `<span class="group-name">${escapeHtml(group.name)}</span><span class="group-count">${groupCount}</span>`;
+          button.addEventListener("click", () => {
+            if (getActiveGroupId() === group.id) return;
+            setActiveGroupId(group.id);
+            saveActiveGroupsLocal();
+            render();
+            setStatus(`Viewing ${getActiveProfileLabel()}'s ${group.name} prompts`);
+          });
+          wireGroupDropTarget(button, group.id);
+          dom.groupsContainer.appendChild(button);
+        }
+      }
+
+      function wireGroupDropTarget(element, groupId) {
+        element.addEventListener("dragover", (event) => {
+          if (!dragState.draggedId) return;
+          if (groupId === GROUP_ALL_ID) return;
+          event.preventDefault();
+          if (event.dataTransfer) event.dataTransfer.dropEffect = "move";
+          element.classList.add("drop-target");
+        });
+
+        element.addEventListener("dragleave", (event) => {
+          const related = event.relatedTarget;
+          if (related && element.contains(related)) return;
+          element.classList.remove("drop-target");
+        });
+
+        element.addEventListener("drop", (event) => {
+          if (!dragState.draggedId) return;
+          event.preventDefault();
+          element.classList.remove("drop-target");
+          if (groupId === GROUP_ALL_ID) {
+            setStatus("Drop on a specific group to move a prompt");
+            return;
+          }
+          moveBlockToGroup(dragState.draggedId, groupId);
+          clearDropMarkers();
+        });
       }
 
       function createBlockElement(block) {
@@ -731,8 +1179,16 @@
         description.className = "block-description";
         description.textContent = block.description;
 
+        const meta = document.createElement("div");
+        meta.className = "block-meta";
+        const badge = document.createElement("span");
+        badge.className = "group-badge";
+        badge.textContent = getGroupLabel(block.groupId);
+        meta.appendChild(badge);
+
         titleWrap.appendChild(title);
         titleWrap.appendChild(description);
+        titleWrap.appendChild(meta);
 
         const arrowBtn = document.createElement("button");
         arrowBtn.className = "arrow-btn";
@@ -874,14 +1330,24 @@
 
       function render() {
         dom.blocksContainer.innerHTML = "";
+        ensureActiveGroupIsValid();
+        renderGroups();
         updateCountLabel();
-        const activeBlocks = getActiveBlocks();
+        const activeBlocks = getVisibleBlocks();
 
         if (!activeBlocks.length) {
           const empty = document.createElement("div");
           empty.className = "empty-state";
-          empty.textContent =
-            `No context blocks yet for ${getActiveProfileLabel()}. Use + New Context to create one.`;
+          if (getActiveSearchTerm().trim()) {
+            empty.textContent =
+              `No prompts match "${getActiveSearchTerm().trim()}" in ${getActiveGroupLabel()}.`;
+          } else if (getActiveGroupId() === GROUP_ALL_ID) {
+            empty.textContent =
+              `No prompts yet for ${getActiveProfileLabel()}. Use + New Context to create one.`;
+          } else {
+            empty.textContent =
+              `No prompts yet in ${getActiveGroupLabel()}. Use + New Context to create one.`;
+          }
           dom.blocksContainer.appendChild(empty);
           return;
         }
@@ -895,6 +1361,10 @@
         const marked = dom.blocksContainer.querySelectorAll(".drop-before, .drop-after");
         for (const node of marked) {
           node.classList.remove("drop-before", "drop-after");
+        }
+        const groupMarked = dom.groupsContainer.querySelectorAll(".drop-target");
+        for (const node of groupMarked) {
+          node.classList.remove("drop-target");
         }
       }
 
@@ -931,6 +1401,34 @@
         render();
         void persistWithStatus(
           `Changed order of "${truncateStatusName(draggedBlock.name)}"`
+        );
+      }
+
+      function moveBlockToGroup(draggedId, targetGroupId) {
+        const activeBlocks = getActiveBlocks();
+        const dragIndex = activeBlocks.findIndex((block) => block.id === draggedId);
+        if (dragIndex < 0) return;
+        const draggedBlock = activeBlocks[dragIndex];
+        if (!draggedBlock) return;
+        if (draggedBlock.groupId === targetGroupId) {
+          setStatus(`"${truncateStatusName(draggedBlock.name)}" is already in ${getGroupLabel(targetGroupId)}`);
+          return;
+        }
+
+        const previousBlocks = cloneBlocks(activeBlocks);
+        const [moved] = activeBlocks.splice(dragIndex, 1);
+        moved.groupId = targetGroupId;
+        moved.updatedAt = nowIso();
+        activeBlocks.push(moved);
+        setActiveBlocks(activeBlocks);
+
+        setUndoSnapshot(
+          previousBlocks,
+          `Restored "${truncateStatusName(moved.name)}" to ${getGroupLabel(previousBlocks[dragIndex].groupId || DEFAULT_GROUP_ID)}`
+        );
+        render();
+        void persistWithStatus(
+          `Moved "${truncateStatusName(moved.name)}" to ${getGroupLabel(targetGroupId)}`
         );
       }
 
@@ -1004,6 +1502,7 @@
         state.editingId = null;
         dom.dialogTitle.textContent = "New Context Block";
         dom.contextForm.reset();
+        populateGroupSelect();
         dom.contextDialog.showModal();
         dom.nameInput.focus();
       }
@@ -1017,6 +1516,7 @@
         dom.nameInput.value = block.name;
         dom.descriptionInput.value = block.description;
         dom.contextInput.value = block.contextText;
+        populateGroupSelect(block.groupId);
         dom.contextDialog.showModal();
         dom.nameInput.focus();
       }
@@ -1029,6 +1529,7 @@
         const name = dom.nameInput.value.trim();
         const description = dom.descriptionInput.value.trim();
         const contextText = dom.contextInput.value;
+        const selectedGroupId = dom.groupSelect.value || DEFAULT_GROUP_ID;
 
         if (!name || !description || !contextText.trim()) {
           setStatus("Name, description, and context block are required", true);
@@ -1052,6 +1553,7 @@
             name,
             description,
             contextText,
+            groupId: selectedGroupId,
             updatedAt: nowIso(),
           };
 
@@ -1069,6 +1571,7 @@
             name,
             description,
             contextText,
+            groupId: selectedGroupId,
             createdAt: nowIso(),
             updatedAt: nowIso(),
             order: activeBlocks.length,
@@ -1122,10 +1625,81 @@
         }
       }
 
+      function populateGroupSelect(selectedGroupId = "") {
+        dom.groupSelect.innerHTML = "";
+        const groups = getActiveGroups();
+        let targetId =
+          selectedGroupId ||
+          (getActiveGroupId() === GROUP_ALL_ID ? DEFAULT_GROUP_ID : getActiveGroupId());
+        const validIds = new Set(groups.map((group) => group.id));
+        if (!validIds.has(targetId)) {
+          targetId = DEFAULT_GROUP_ID;
+        }
+
+        for (const group of groups) {
+          const option = document.createElement("option");
+          option.value = group.id;
+          option.textContent = group.name;
+          dom.groupSelect.appendChild(option);
+        }
+        dom.groupSelect.value = targetId;
+      }
+
+      function addGroup() {
+        const rawName = window.prompt("New group name:");
+        if (rawName === null) return;
+        const name = rawName.trim();
+        if (!name) {
+          setStatus("Group name is required", true);
+          return;
+        }
+
+        const groups = getActiveGroups();
+        const existing = groups.find(
+          (group) => group.name.toLowerCase() === name.toLowerCase()
+        );
+        if (existing) {
+          setActiveGroupId(existing.id);
+          saveActiveGroupsLocal();
+          render();
+          setStatus(`Using existing group "${truncateStatusName(existing.name)}"`);
+          return;
+        }
+
+        const nextGroups = [
+          ...groups,
+          {
+            id: generateId("grp"),
+            name,
+            createdAt: nowIso(),
+            order: groups.length,
+          },
+        ];
+        setActiveGroups(nextGroups);
+        setActiveGroupId(nextGroups[nextGroups.length - 1].id);
+        saveActiveGroupsLocal();
+        render();
+        void persistWithStatus(`Added group "${truncateStatusName(name)}"`);
+      }
+
+      function escapeHtml(value) {
+        return String(value)
+          .replaceAll("&", "&amp;")
+          .replaceAll("<", "&lt;")
+          .replaceAll(">", "&gt;")
+          .replaceAll('"', "&quot;");
+      }
+
       function bindEvents() {
         dom.btnAdd.addEventListener("click", openNewDialog);
-        dom.btnProfileJohn.addEventListener("click", () => switchProfile("john"));
-        dom.btnProfileKathy.addEventListener("click", () => switchProfile("kathy"));
+        dom.btnAddGroup.addEventListener("click", addGroup);
+        dom.userSelect.addEventListener("change", () => {
+          switchProfile(dom.userSelect.value);
+        });
+        dom.searchInput.addEventListener("input", () => {
+          state.searchByProfile[state.activeProfile] = dom.searchInput.value;
+          render();
+        });
         dom.btnCancelDialog.addEventListener("click", closeDialog);
         dom.contextForm.addEventListener("submit", (event) => {
           event.preventDefault();
@@ -1138,15 +1712,35 @@
 
       async function init() {
         bindEvents();
+        try {
+          await loadAppConfig();
+        } catch (_err) {
+          state.configuredUsers = [{ id: "default", label: "Default" }];
+          setStatus("Could not load app config; using default user", true);
+        }
+        for (const user of state.configuredUsers) {
+          initProfileState(user.id);
+        }
+        if (!state.configuredUsers.some((user) => user.id === state.activeProfile)) {
+          state.activeProfile = state.configuredUsers[0].id;
+        }
         loadActiveProfileLocal();
-        updateProfileButtons();
+        loadActiveGroupsLocal();
+        if (!state.configuredUsers.some((user) => user.id === state.activeProfile)) {
+          state.activeProfile = state.configuredUsers[0].id;
+        }
+        renderUserSelect();
         try {
           await loadFromServer();
         } catch (_err) {
-          state.profiles.john = [];
-          state.profiles.kathy = [];
+          for (const user of state.configuredUsers) {
+            state.profiles[user.id] = [];
+            state.groups[user.id] = ensureDefaultGroup([]);
+          }
           setStatus("Could not load from server", true);
         }
+        ensureActiveGroupIsValid();
+        syncSearchInputFromState();
         render();
         if (!dom.statusText.textContent) {
           setStatus("");
