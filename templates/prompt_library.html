@@ -559,7 +559,7 @@
 
   <div class="status">
     <div class="status-description">
-      Allows you to save and retrieve re-usable context blocks for quick paste into LLM sessions in order to establish consistent session context
+      Allows you to save and retrieve reusable prompt blocks for quick paste into LLM sessions in order to establish a consistent session setup
     </div>
   </div>
 
@@ -573,10 +573,10 @@
     </aside>
     <section class="list-panel">
       <div class="list-panel-header">
-        <span id="countLabel">0 contexts</span>
+        <span id="countLabel">0 prompts</span>
         <div class="list-controls">
           <input id="searchInput" type="search" placeholder="Search prompts..." />
-          <button id="btnAdd" class="btn-primary">+ New Context</button>
+          <button id="btnAdd" class="btn-primary">+ New Prompt</button>
         </div>
       </div>
       <div id="statusMessage" class="list-status">
@@ -589,7 +589,7 @@
 
   <dialog id="contextDialog">
     <form id="contextForm" method="dialog" class="dialog-content">
-      <h2 id="dialogTitle" class="dialog-title">New Context Block</h2>
+      <h2 id="dialogTitle" class="dialog-title">New Prompt</h2>
 
       <label>
         Name
@@ -607,7 +607,7 @@
       </label>
 
       <label>
-        Full Context Block
+        Full Prompt
         <textarea id="contextInput" class="context-input" name="context" required></textarea>
       </label>
 
@@ -1208,7 +1208,7 @@
         quickCopyBtn.type = "button";
         quickCopyBtn.draggable = false;
         quickCopyBtn.textContent = "Copy";
-        quickCopyBtn.title = "Copy full context to clipboard";
+        quickCopyBtn.title = "Copy full prompt to clipboard";
 
         const editBtn = document.createElement("button");
         editBtn.type = "button";
@@ -1343,10 +1343,10 @@
               `No prompts match "${getActiveSearchTerm().trim()}" in ${getActiveGroupLabel()}.`;
           } else if (getActiveGroupId() === GROUP_ALL_ID) {
             empty.textContent =
-              `No prompts yet for ${getActiveProfileLabel()}. Use + New Context to create one.`;
+              `No prompts yet for ${getActiveProfileLabel()}. Use + New Prompt to create one.`;
           } else {
             empty.textContent =
-              `No prompts yet in ${getActiveGroupLabel()}. Use + New Context to create one.`;
+              `No prompts yet in ${getActiveGroupLabel()}. Use + New Prompt to create one.`;
           }
           dom.blocksContainer.appendChild(empty);
           return;
@@ -1500,7 +1500,7 @@
 
       function openNewDialog() {
         state.editingId = null;
-        dom.dialogTitle.textContent = "New Context Block";
+        dom.dialogTitle.textContent = "New Prompt";
         dom.contextForm.reset();
         populateGroupSelect();
         dom.contextDialog.showModal();
@@ -1512,7 +1512,7 @@
         if (!block) return;
 
         state.editingId = block.id;
-        dom.dialogTitle.textContent = "Edit Context Block";
+        dom.dialogTitle.textContent = "Edit Prompt";
         dom.nameInput.value = block.name;
         dom.descriptionInput.value = block.description;
         dom.contextInput.value = block.contextText;
@@ -1532,7 +1532,7 @@
         const selectedGroupId = dom.groupSelect.value || DEFAULT_GROUP_ID;
 
         if (!name || !description || !contextText.trim()) {
-          setStatus("Name, description, and context block are required", true);
+          setStatus("Name, description, and prompt text are required", true);
           return;
         }
 
@@ -1579,7 +1579,7 @@
 
           activeBlocks.push(newBlock);
           setActiveBlocks(activeBlocks);
-          setUndoSnapshot(previousBlocks, "Context block removed");
+          setUndoSnapshot(previousBlocks, "Prompt removed");
           render();
           closeDialog();
           void persistWithStatus(`Added "${truncateStatusName(name)}"`);
