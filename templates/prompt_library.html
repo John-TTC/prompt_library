@@ -258,6 +258,15 @@
       background: #243244;
     }
 
+    .nav-section-title {
+      margin: 8px 4px 2px;
+      font-size: 11px;
+      font-weight: 600;
+      color: #9ca3af;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+
     .group-name {
       min-width: 0;
       overflow: hidden;
@@ -269,6 +278,59 @@
       color: var(--muted);
       font-size: 11px;
       flex-shrink: 0;
+    }
+
+    .agent-tabs {
+      display: flex;
+      gap: 6px;
+      flex-wrap: wrap;
+    }
+
+    .agent-tab-btn {
+      padding: 5px 9px;
+      font-size: 11px;
+      border-radius: 7px;
+    }
+
+    .agent-tab-btn.active {
+      background: #1e3a8a;
+      border-color: #3b82f6;
+      box-shadow: inset 0 0 0 1px rgba(147, 197, 253, 0.35);
+    }
+
+    .agent-section-meta {
+      font-size: 12px;
+      color: #9ca3af;
+    }
+
+    .agent-editor {
+      min-height: 170px;
+      background: #030712;
+      border: 1px solid #1f2937;
+      border-radius: 8px;
+      color: #d1d5db;
+      padding: 10px;
+      font-family: Consolas, "Courier New", monospace;
+      font-size: 12px;
+      line-height: 1.4;
+      resize: vertical;
+    }
+
+    .agent-editor.is-dirty {
+      border-color: #60a5fa;
+      background: rgba(30, 58, 138, 0.12);
+    }
+
+    .agent-action-bar {
+      display: flex;
+      justify-content: flex-end;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+
+    .agent-action-bar button {
+      font-size: 12px;
+      padding: 6px 10px;
     }
 
     .list-panel {
@@ -691,16 +753,25 @@
 
       const GROUP_ALL_ID = "__all__";
       const DEFAULT_GROUP_ID = "group-unsorted";
+      const AGENT_GROUP_ALL_ID = "__all_agents__";
+      const AGENT_GROUP_UNSORTED_ID = "agent-group-unsorted";
       const PROFILE_STORAGE_KEY = "promptLibrary.activeProfile";
       const GROUP_STORAGE_KEY = "promptLibrary.activeGroups";
+      const AGENT_GROUP_STORAGE_KEY = "promptLibrary.activeAgentGroups";
 
       const state = {
         configuredUsers: [{ id: "default", label: "Default" }],
         profiles: {},
         groups: {},
+        agentsByProfile: {},
+        agentDetailsByKey: {},
         activeProfile: "default",
+        activeMode: "prompts",
         activeGroupByProfile: {},
+        activeAgentGroupByProfile: {},
+        expandedAgentKeyByProfile: {},
         searchByProfile: {},
+        agentSearchByProfile: {},
         editingId: null,
         undoSnapshot: null,
         undoStatusMessage: "",
@@ -717,11 +788,21 @@
         } else {
           state.groups[profileId] = ensureDefaultGroup(state.groups[profileId]);
         }
+        if (!state.agentsByProfile[profileId]) state.agentsByProfile[profileId] = [];
         if (!state.activeGroupByProfile[profileId]) {
           state.activeGroupByProfile[profileId] = GROUP_ALL_ID;
         }
+        if (!state.activeAgentGroupByProfile[profileId]) {
+          state.activeAgentGroupByProfile[profileId] = AGENT_GROUP_ALL_ID;
+        }
+        if (typeof state.expandedAgentKeyByProfile[profileId] !== "string") {
+          state.expandedAgentKeyByProfile[profileId] = "";
+        }
         if (typeof state.searchByProfile[profileId] !== "string") {
           state.searchByProfile[profileId] = "";
+        }
+        if (typeof state.agentSearchByProfile[profileId] !== "string") {
+          state.agentSearchByProfile[profileId] = "";
         }
       }
 
@@ -801,6 +882,135 @@
         }
       }
 
+      function normalizeAgentMeta(entry) {
+        if (!entry || typeof entry !== "object") return null;
+        const user = typeof entry.user === "string" ? entry.user.trim() : "";
+        const groupRaw = typeof entry.group === "string" ? entry.group.trim() : "";
+        const group = groupRaw || AGENT_GROUP_UNSORTED_ID;
+        const agentSlug =
+          typeof entry.agent_slug === "string" ? entry.agent_slug.trim() : "";
+        const title = typeof entry.title === "string" ? entry.title.trim() : "";
+        if (!user || !agentSlug || !title) return null;
+        const description =
+          typeof entry.description === "string" ? entry.description : "";
+        const sectionOrder = Array.isArray(entry.section_order)
+          ? entry.section_order.filter((s) => typeof s === "string" && s.trim())
+          : [];
+        return {
+          id: typeof entry.id === "string" && entry.id.trim() ? entry.id : agentSlug,
+          title,
+          description,
+          user,
+          group,
+          agent_slug: agentSlug,
+          section_order: sectionOrder,
+        };
+      }
+
+      function normalizeSectionKey(value) {
+        const raw = String(value || "").trim().toLowerCase();
+        if (!raw) return "";
+        return raw.replace(/\.md$/, "").replace(/-md$/, "").replace(/_md$/, "");
+      }
+
+      function formatSectionLabel(sectionKey) {
+        const normalized = normalizeSectionKey(sectionKey);
+        if (!normalized) return "";
+        return normalized
+          .split(/[-_]+/)
+          .filter(Boolean)
+          .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+          .join(" ");
+      }
+
+      function getAgentKey(user, group, agentSlug) {
+        return `${user}|${group}|${agentSlug}`;
+      }
+
+      async function loadAgentsForProfile(profileId) {
+        const response = await fetch(
+          `/agents?user=${encodeURIComponent(profileId)}`,
+          { cache: "no-store" }
+        );
+        if (!response.ok) throw new Error("Agent list load failed");
+        const parsed = await response.json();
+        const listRaw = parsed && Array.isArray(parsed.agents) ? parsed.agents : [];
+        const normalized = [];
+        for (const entry of listRaw) {
+          const item = normalizeAgentMeta(entry);
+          if (item) normalized.push(item);
+        }
+        state.agentsByProfile[profileId] = normalized;
+      }
+
+      async function loadAgentDetail(user, group, agentSlug) {
+        const key = getAgentKey(user, group, agentSlug);
+        const existing = state.agentDetailsByKey[key];
+        if (existing) return existing;
+
+        const query = new URLSearchParams({
+          user,
+          group,
+          agent: agentSlug,
+        });
+        const response = await fetch(`/agents/load?${query.toString()}`, {
+          cache: "no-store",
+        });
+        if (!response.ok) throw new Error("Agent load failed");
+        const parsed = await response.json();
+        const sectionOrderRaw = Array.isArray(parsed.section_order)
+          ? parsed.section_order
+          : [];
+        const sectionMapRaw =
+          parsed && parsed.sections && typeof parsed.sections === "object"
+            ? parsed.sections
+            : {};
+        const sectionMap = {};
+        for (const [key, value] of Object.entries(sectionMapRaw)) {
+          const normalizedKey = normalizeSectionKey(key);
+          if (!normalizedKey) continue;
+          if (typeof sectionMap[normalizedKey] === "undefined") {
+            sectionMap[normalizedKey] = typeof value === "string" ? value : "";
+          }
+        }
+        const sectionOrder = [];
+        const seen = new Set();
+        for (const name of sectionOrderRaw) {
+          if (typeof name !== "string" || !name.trim()) continue;
+          const normalized = normalizeSectionKey(name);
+          if (!normalized || seen.has(normalized)) continue;
+          seen.add(normalized);
+          sectionOrder.push(normalized);
+        }
+        if (!sectionOrder.length) {
+          for (const key of Object.keys(sectionMap)) {
+            if (!seen.has(key)) {
+              seen.add(key);
+              sectionOrder.push(key);
+            }
+          }
+        }
+        const savedBySection = {};
+        const draftBySection = {};
+        const dirtyBySection = {};
+        for (const section of sectionOrder) {
+          const text = typeof sectionMap[section] === "string" ? sectionMap[section] : "";
+          savedBySection[section] = text;
+          draftBySection[section] = text;
+          dirtyBySection[section] = false;
+        }
+
+        const detail = {
+          activeSection: sectionOrder[0] || "",
+          sectionOrder,
+          savedBySection,
+          draftBySection,
+          dirtyBySection,
+        };
+        state.agentDetailsByKey[key] = detail;
+        return detail;
+      }
+
       async function saveToServer() {
         const response = await fetch("/data", {
           method: "POST",
@@ -843,6 +1053,27 @@
 
       function setActiveGroupId(groupId) {
         state.activeGroupByProfile[state.activeProfile] = groupId;
+      }
+
+      function getActiveAgentGroupId() {
+        return (
+          state.activeAgentGroupByProfile[state.activeProfile] || AGENT_GROUP_ALL_ID
+        );
+      }
+
+      function setActiveAgentGroupId(groupId) {
+        state.activeAgentGroupByProfile[state.activeProfile] = groupId;
+      }
+
+      function getActiveAgents() {
+        return state.agentsByProfile[state.activeProfile] || [];
+      }
+
+      function getActiveModeSearchTerm() {
+        if (state.activeMode === "agents") {
+          return state.agentSearchByProfile[state.activeProfile] || "";
+        }
+        return state.searchByProfile[state.activeProfile] || "";
       }
 
       function getActiveProfileLabel() {
@@ -893,6 +1124,17 @@
         }
       }
 
+      function saveActiveAgentGroupsLocal() {
+        try {
+          window.localStorage.setItem(
+            AGENT_GROUP_STORAGE_KEY,
+            JSON.stringify(state.activeAgentGroupByProfile)
+          );
+        } catch (_err) {
+          // Ignore storage failures.
+        }
+      }
+
       function loadActiveGroupsLocal() {
         try {
           const raw = window.localStorage.getItem(GROUP_STORAGE_KEY);
@@ -910,9 +1152,29 @@
         }
       }
 
+      function loadActiveAgentGroupsLocal() {
+        try {
+          const raw = window.localStorage.getItem(AGENT_GROUP_STORAGE_KEY);
+          if (!raw) return;
+          const parsed = JSON.parse(raw);
+          if (parsed && typeof parsed === "object") {
+            for (const user of state.configuredUsers) {
+              if (typeof parsed[user.id] === "string") {
+                state.activeAgentGroupByProfile[user.id] = parsed[user.id];
+              }
+            }
+          }
+        } catch (_err) {
+          // Ignore storage failures.
+        }
+      }
+
       function switchProfile(profileId) {
+        return (async () => {
         if (!state.configuredUsers.some((user) => user.id === profileId)) return;
         if (state.activeProfile === profileId) return;
+        const okToSwitch = await confirmDiscardAgentChangesIfNeeded();
+        if (!okToSwitch) return;
         state.activeProfile = profileId;
         initProfileState(profileId);
         state.editingId = null;
@@ -921,13 +1183,30 @@
           closeDialog();
         }
         ensureActiveGroupIsValid();
+        ensureActiveAgentGroupIsValid();
+        void loadAgentsForProfile(profileId).then(() => {
+          if (state.activeProfile === profileId && state.activeMode === "agents") {
+            render();
+          }
+        }).catch(() => {
+          if (state.activeProfile === profileId && state.activeMode === "agents") {
+            setStatus("Could not load agents from server", true);
+          }
+        });
         renderUserSelect();
         saveActiveProfileLocal();
         syncSearchInputFromState();
         render();
-        setStatus(
-          `Viewing ${getActiveProfileLabel()}'s prompts in ${getActiveGroupLabel()}`
-        );
+        if (state.activeMode === "agents") {
+          setStatus(
+            `Viewing ${getActiveProfileLabel()}'s agents in ${getActiveAgentGroupLabel()}`
+          );
+        } else {
+          setStatus(
+            `Viewing ${getActiveProfileLabel()}'s prompts in ${getActiveGroupLabel()}`
+          );
+        }
+        })();
       }
 
       function setUndoSnapshot(snapshot, undoStatusMessage) {
@@ -1094,6 +1373,25 @@
         return getGroupLabel(getActiveGroupId());
       }
 
+      function getAgentGroupBuckets() {
+        const groups = new Map();
+        for (const agent of getActiveAgents()) {
+          const groupName = agent.group || AGENT_GROUP_UNSORTED_ID;
+          if (!groups.has(groupName)) groups.set(groupName, 0);
+          groups.set(groupName, (groups.get(groupName) || 0) + 1);
+        }
+        return Array.from(groups.entries())
+          .map(([name, count]) => ({ name, count }))
+          .sort((a, b) => a.name.localeCompare(b.name));
+      }
+
+      function getActiveAgentGroupLabel() {
+        const groupId = getActiveAgentGroupId();
+        if (groupId === AGENT_GROUP_ALL_ID) return "All agents";
+        if (groupId === AGENT_GROUP_UNSORTED_ID) return "Unsorted";
+        return groupId;
+      }
+
       function ensureActiveGroupIsValid() {
         const groupId = getActiveGroupId();
         if (groupId === GROUP_ALL_ID) return;
@@ -1103,18 +1401,32 @@
         }
       }
 
+      function ensureActiveAgentGroupIsValid() {
+        const groupId = getActiveAgentGroupId();
+        if (groupId === AGENT_GROUP_ALL_ID) return;
+        if (groupId === AGENT_GROUP_UNSORTED_ID) return;
+        const exists = getAgentGroupBuckets().some((group) => group.name === groupId);
+        if (!exists) {
+          setActiveAgentGroupId(AGENT_GROUP_ALL_ID);
+        }
+      }
+
       function getActiveSearchTerm() {
-        return state.searchByProfile[state.activeProfile] || "";
+        return getActiveModeSearchTerm();
       }
 
       function syncSearchInputFromState() {
-        dom.searchInput.value = getActiveSearchTerm();
+        dom.searchInput.value = getActiveModeSearchTerm();
+        dom.searchInput.placeholder =
+          state.activeMode === "agents" ? "Search agents..." : "Search prompts...";
       }
 
       function getVisibleBlocks() {
         const allBlocks = getActiveBlocks();
         const selectedGroupId = getActiveGroupId();
-        const query = getActiveSearchTerm().trim().toLowerCase();
+        const query = (state.searchByProfile[state.activeProfile] || "")
+          .trim()
+          .toLowerCase();
 
         return allBlocks.filter((block) => {
           const inGroup =
@@ -1129,7 +1441,36 @@
         });
       }
 
+      function getVisibleAgents() {
+        const allAgents = getActiveAgents();
+        const selectedGroup = getActiveAgentGroupId();
+        const query = (state.agentSearchByProfile[state.activeProfile] || "")
+          .trim()
+          .toLowerCase();
+
+        return allAgents.filter((agent) => {
+          const normalizedGroup = agent.group || AGENT_GROUP_UNSORTED_ID;
+          const inGroup =
+            selectedGroup === AGENT_GROUP_ALL_ID || normalizedGroup === selectedGroup;
+          if (!inGroup) return false;
+          if (!query) return true;
+          return (
+            agent.title.toLowerCase().includes(query) ||
+            (agent.description || "").toLowerCase().includes(query) ||
+            normalizedGroup.toLowerCase().includes(query)
+          );
+        });
+      }
+
       function updateCountLabel() {
+        if (state.activeMode === "agents") {
+          const visibleCount = getVisibleAgents().length;
+          const itemLabel = visibleCount === 1 ? "1 agent" : `${visibleCount} agents`;
+          const searchLabel = getActiveSearchTerm().trim() ? " - filtered" : "";
+          dom.countLabel.textContent =
+            `${itemLabel} in ${getActiveAgentGroupLabel()} (${getActiveProfileLabel()})${searchLabel}`;
+          return;
+        }
         const visibleCount = getVisibleBlocks().length;
         const itemLabel = visibleCount === 1 ? "1 prompt" : `${visibleCount} prompts`;
         const searchLabel = getActiveSearchTerm().trim() ? " - filtered" : "";
@@ -1139,23 +1480,37 @@
 
       function renderGroups() {
         dom.groupsContainer.innerHTML = "";
-        const allBlocksCount = getActiveBlocks().length;
+        const promptSectionTitle = document.createElement("div");
+        promptSectionTitle.className = "nav-section-title";
+        promptSectionTitle.textContent = "Prompts";
+        dom.groupsContainer.appendChild(promptSectionTitle);
 
-        const allButton = document.createElement("button");
-        allButton.type = "button";
-        allButton.className =
-          "group-item" + (getActiveGroupId() === GROUP_ALL_ID ? " active" : "");
-        allButton.innerHTML =
-          `<span class="group-name">All prompts</span><span class="group-count">${allBlocksCount}</span>`;
-        allButton.addEventListener("click", () => {
-          if (getActiveGroupId() === GROUP_ALL_ID) return;
+        const allBlocksCount = getActiveBlocks().length;
+        const promptAllButton = document.createElement("button");
+        promptAllButton.type = "button";
+        promptAllButton.className =
+          "group-item" +
+          (state.activeMode === "prompts" && getActiveGroupId() === GROUP_ALL_ID
+            ? " active"
+            : "");
+        promptAllButton.innerHTML =
+          `<span class="group-name">All Prompts</span><span class="group-count">${allBlocksCount}</span>`;
+        promptAllButton.addEventListener("click", () => {
+          void (async () => {
+          if (state.activeMode === "agents") {
+            const okToLeave = await confirmDiscardAgentChangesIfNeeded();
+            if (!okToLeave) return;
+          }
+          state.activeMode = "prompts";
           setActiveGroupId(GROUP_ALL_ID);
           saveActiveGroupsLocal();
+          syncSearchInputFromState();
           render();
           setStatus(`Showing all prompts for ${getActiveProfileLabel()}`);
+          })();
         });
-        wireGroupDropTarget(allButton, GROUP_ALL_ID);
-        dom.groupsContainer.appendChild(allButton);
+        wireGroupDropTarget(promptAllButton, GROUP_ALL_ID);
+        dom.groupsContainer.appendChild(promptAllButton);
 
         for (const group of getActiveGroups()) {
           const groupCount = getActiveBlocks().filter(
@@ -1164,17 +1519,129 @@
           const button = document.createElement("button");
           button.type = "button";
           button.className =
-            "group-item" + (getActiveGroupId() === group.id ? " active" : "");
+            "group-item" +
+            (state.activeMode === "prompts" && getActiveGroupId() === group.id
+              ? " active"
+              : "");
           button.innerHTML =
             `<span class="group-name">${escapeHtml(group.name)}</span><span class="group-count">${groupCount}</span>`;
           button.addEventListener("click", () => {
-            if (getActiveGroupId() === group.id) return;
+            void (async () => {
+            if (state.activeMode === "agents") {
+              const okToLeave = await confirmDiscardAgentChangesIfNeeded();
+              if (!okToLeave) return;
+            }
+            state.activeMode = "prompts";
             setActiveGroupId(group.id);
             saveActiveGroupsLocal();
+            syncSearchInputFromState();
             render();
             setStatus(`Viewing ${getActiveProfileLabel()}'s ${group.name} prompts`);
+            })();
           });
           wireGroupDropTarget(button, group.id);
+          dom.groupsContainer.appendChild(button);
+        }
+
+        const agentSectionTitle = document.createElement("div");
+        agentSectionTitle.className = "nav-section-title";
+        agentSectionTitle.textContent = "Agents";
+        dom.groupsContainer.appendChild(agentSectionTitle);
+
+        const allAgentsCount = getActiveAgents().length;
+        const agentAllButton = document.createElement("button");
+        agentAllButton.type = "button";
+        agentAllButton.className =
+          "group-item" +
+          (state.activeMode === "agents" &&
+          getActiveAgentGroupId() === AGENT_GROUP_ALL_ID
+            ? " active"
+            : "");
+        agentAllButton.innerHTML =
+          `<span class="group-name">All Agents</span><span class="group-count">${allAgentsCount}</span>`;
+        agentAllButton.addEventListener("click", () => {
+          void (async () => {
+          if (
+            state.activeMode === "agents" &&
+            getActiveAgentGroupId() !== AGENT_GROUP_ALL_ID
+          ) {
+            const okToSwitch = await confirmDiscardAgentChangesIfNeeded();
+            if (!okToSwitch) return;
+          }
+          state.activeMode = "agents";
+          setActiveAgentGroupId(AGENT_GROUP_ALL_ID);
+          saveActiveAgentGroupsLocal();
+          syncSearchInputFromState();
+          render();
+          setStatus(`Showing all agents for ${getActiveProfileLabel()}`);
+          })();
+        });
+        dom.groupsContainer.appendChild(agentAllButton);
+
+        const agentGroups = getAgentGroupBuckets();
+        const unsortedCount = getActiveAgents().filter(
+          (agent) => !agent.group || agent.group === AGENT_GROUP_UNSORTED_ID
+        ).length;
+        if (unsortedCount > 0) {
+          const unsortedBtn = document.createElement("button");
+          unsortedBtn.type = "button";
+          unsortedBtn.className =
+            "group-item" +
+            (state.activeMode === "agents" &&
+            getActiveAgentGroupId() === AGENT_GROUP_UNSORTED_ID
+              ? " active"
+              : "");
+          unsortedBtn.innerHTML =
+            `<span class="group-name">Unsorted</span><span class="group-count">${unsortedCount}</span>`;
+          unsortedBtn.addEventListener("click", () => {
+            void (async () => {
+            if (
+              state.activeMode === "agents" &&
+              getActiveAgentGroupId() !== AGENT_GROUP_UNSORTED_ID
+            ) {
+              const okToSwitch = await confirmDiscardAgentChangesIfNeeded();
+              if (!okToSwitch) return;
+            }
+            state.activeMode = "agents";
+            setActiveAgentGroupId(AGENT_GROUP_UNSORTED_ID);
+            saveActiveAgentGroupsLocal();
+            syncSearchInputFromState();
+            render();
+            setStatus(`Viewing ${getActiveProfileLabel()}'s unsorted agents`);
+            })();
+          });
+          dom.groupsContainer.appendChild(unsortedBtn);
+        }
+
+        for (const agentGroup of agentGroups) {
+          if (agentGroup.name === AGENT_GROUP_UNSORTED_ID) continue;
+          const button = document.createElement("button");
+          button.type = "button";
+          button.className =
+            "group-item" +
+            (state.activeMode === "agents" &&
+            getActiveAgentGroupId() === agentGroup.name
+              ? " active"
+              : "");
+          button.innerHTML =
+            `<span class="group-name">${escapeHtml(agentGroup.name)}</span><span class="group-count">${agentGroup.count}</span>`;
+          button.addEventListener("click", () => {
+            void (async () => {
+            if (
+              state.activeMode === "agents" &&
+              getActiveAgentGroupId() !== agentGroup.name
+            ) {
+              const okToSwitch = await confirmDiscardAgentChangesIfNeeded();
+              if (!okToSwitch) return;
+            }
+            state.activeMode = "agents";
+            setActiveAgentGroupId(agentGroup.name);
+            saveActiveAgentGroupsLocal();
+            syncSearchInputFromState();
+            render();
+            setStatus(`Viewing ${getActiveProfileLabel()}'s ${agentGroup.name} agents`);
+            })();
+          });
           dom.groupsContainer.appendChild(button);
         }
       }
@@ -1526,11 +1993,359 @@
         return card;
       }
 
+      function createAgentElement(agentMeta) {
+        const agentKey = getAgentKey(
+          agentMeta.user,
+          agentMeta.group || AGENT_GROUP_UNSORTED_ID,
+          agentMeta.agent_slug
+        );
+        const expandedKey = state.expandedAgentKeyByProfile[state.activeProfile] || "";
+        const isExpanded = expandedKey === agentKey;
+        const detail = state.agentDetailsByKey[agentKey] || null;
+        const sectionCount = Array.isArray(agentMeta.section_order)
+          ? agentMeta.section_order.length
+          : 0;
+
+        const card = document.createElement("article");
+        card.className = "block-card";
+        card.dataset.agentKey = agentKey;
+        card.draggable = false;
+
+        const header = document.createElement("div");
+        header.className = "block-header";
+
+        const titleWrap = document.createElement("div");
+        titleWrap.className = "block-title-wrap";
+        const title = document.createElement("h3");
+        title.className = "block-title";
+        title.textContent = agentMeta.title;
+
+        const description = document.createElement("p");
+        description.className = "block-description";
+        description.textContent = agentMeta.description || "No description";
+
+        const meta = document.createElement("div");
+        meta.className = "block-meta";
+        const metaBadge = document.createElement("span");
+        metaBadge.className = "group-badge";
+        metaBadge.textContent = `Sections: ${sectionCount}`;
+        meta.appendChild(metaBadge);
+
+        titleWrap.appendChild(title);
+        titleWrap.appendChild(description);
+        titleWrap.appendChild(meta);
+
+        const arrowBtn = document.createElement("button");
+        arrowBtn.className = "arrow-btn";
+        arrowBtn.type = "button";
+        arrowBtn.title = "Expand / Collapse";
+        arrowBtn.setAttribute("aria-expanded", String(isExpanded));
+        arrowBtn.innerHTML = isExpanded ? "&#9652;" : "&#9662;";
+
+        const rowActions = document.createElement("div");
+        rowActions.className = "row-actions";
+
+        const constructAgentBtn = document.createElement("button");
+        constructAgentBtn.type = "button";
+        constructAgentBtn.textContent = "Construct Agent Prompt";
+        constructAgentBtn.disabled = true;
+        constructAgentBtn.title = "Available in Stage 5";
+
+        const deleteBtn = document.createElement("button");
+        deleteBtn.type = "button";
+        deleteBtn.className = "btn-danger";
+        deleteBtn.textContent = "Delete";
+
+        rowActions.appendChild(constructAgentBtn);
+        rowActions.appendChild(deleteBtn);
+
+        header.appendChild(arrowBtn);
+        header.appendChild(titleWrap);
+        header.appendChild(rowActions);
+
+        const body = document.createElement("div");
+        body.className = "context-body";
+        body.classList.toggle("open", isExpanded);
+
+        const bodyInner = document.createElement("div");
+        bodyInner.className = "context-body-inner";
+
+        if (isExpanded && detail) {
+          const tabs = document.createElement("div");
+          tabs.className = "agent-tabs";
+          const activeSection = detail.activeSection || detail.sectionOrder[0] || "";
+
+          for (const sectionName of detail.sectionOrder) {
+            const tabBtn = document.createElement("button");
+            tabBtn.type = "button";
+            tabBtn.className =
+              "agent-tab-btn" + (sectionName === activeSection ? " active" : "");
+            tabBtn.textContent = formatSectionLabel(sectionName) || sectionName;
+            tabBtn.title = sectionName;
+            tabBtn.addEventListener("click", () => {
+              void (async () => {
+                const okToSwitch = await confirmDiscardAgentChangesIfNeeded({
+                  detail,
+                  sectionOnly: true,
+                });
+                if (!okToSwitch) return;
+                detail.activeSection = sectionName;
+                render();
+              })();
+            });
+            tabs.appendChild(tabBtn);
+          }
+
+          const sectionMeta = document.createElement("div");
+          sectionMeta.className = "agent-section-meta";
+          sectionMeta.textContent = activeSection
+            ? `${formatSectionLabel(activeSection) || activeSection} section`
+            : "No sections";
+
+          const editor = document.createElement("textarea");
+          editor.className = "agent-editor";
+          editor.value = activeSection
+            ? detail.draftBySection[activeSection] || ""
+            : "";
+          editor.disabled = !activeSection;
+
+          const actionBar = document.createElement("div");
+          actionBar.className = "agent-action-bar";
+
+          const saveBtn = document.createElement("button");
+          saveBtn.type = "button";
+          saveBtn.className = "btn-primary";
+          saveBtn.textContent = "Save";
+
+          const constructSectionBtn = document.createElement("button");
+          constructSectionBtn.type = "button";
+          constructSectionBtn.textContent = "Construct Section Prompt";
+          constructSectionBtn.disabled = true;
+          constructSectionBtn.title = "Available in Stage 5";
+
+          const constructFullBtn = document.createElement("button");
+          constructFullBtn.type = "button";
+          constructFullBtn.textContent = "Construct Agent Prompt";
+          constructFullBtn.disabled = true;
+          constructFullBtn.title = "Available in Stage 5";
+
+          const cancelBtn = document.createElement("button");
+          cancelBtn.type = "button";
+          cancelBtn.textContent = "Cancel";
+
+          function syncDirtyState() {
+            const dirty = activeSection
+              ? !!detail.dirtyBySection[activeSection]
+              : false;
+            saveBtn.disabled = !dirty || !activeSection;
+            cancelBtn.disabled = !dirty || !activeSection;
+            editor.classList.toggle("is-dirty", dirty);
+          }
+
+          editor.addEventListener("input", () => {
+            if (!activeSection) return;
+            detail.draftBySection[activeSection] = editor.value;
+            detail.dirtyBySection[activeSection] =
+              editor.value !== (detail.savedBySection[activeSection] || "");
+            syncDirtyState();
+          });
+
+          saveBtn.addEventListener("click", async () => {
+            if (!activeSection || !detail.dirtyBySection[activeSection]) return;
+            try {
+              const response = await fetch("/agents/section/save", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                  user: agentMeta.user,
+                  group: agentMeta.group || AGENT_GROUP_UNSORTED_ID,
+                  agent: agentMeta.agent_slug,
+                  section: activeSection,
+                  content: detail.draftBySection[activeSection] || "",
+                }),
+              });
+              if (!response.ok) throw new Error("Save failed");
+              detail.savedBySection[activeSection] = detail.draftBySection[activeSection] || "";
+              detail.dirtyBySection[activeSection] = false;
+              syncDirtyState();
+              setStatus(`Saved ${agentMeta.title} ${activeSection} section`);
+            } catch (_err) {
+              setStatus("Agent section save failed: Server may not be running", true);
+            }
+          });
+
+          cancelBtn.addEventListener("click", () => {
+            void (async () => {
+              if (!activeSection) return;
+              const okToDiscard = await confirmDiscardAgentChangesIfNeeded({
+                detail,
+                sectionOnly: true,
+              });
+              if (!okToDiscard) return;
+              editor.value = detail.draftBySection[activeSection] || "";
+              syncDirtyState();
+            })();
+          });
+
+          actionBar.appendChild(saveBtn);
+          actionBar.appendChild(constructFullBtn);
+          actionBar.appendChild(constructSectionBtn);
+          actionBar.appendChild(cancelBtn);
+          bodyInner.appendChild(tabs);
+          bodyInner.appendChild(sectionMeta);
+          bodyInner.appendChild(editor);
+          bodyInner.appendChild(actionBar);
+          syncDirtyState();
+        } else if (isExpanded) {
+          const loading = document.createElement("div");
+          loading.className = "empty-state";
+          loading.textContent = "Loading agent sections...";
+          bodyInner.appendChild(loading);
+        }
+
+        arrowBtn.addEventListener("click", () => {
+          void toggleAgentExpanded(agentMeta);
+        });
+        deleteBtn.addEventListener("click", () => {
+          void deleteAgentItem(agentMeta);
+        });
+
+        card.appendChild(header);
+        body.appendChild(bodyInner);
+        card.appendChild(body);
+
+        card.addEventListener("click", (event) => {
+          const target = event.target;
+          if (!(target instanceof Element)) return;
+          if (target.closest("button")) return;
+          if (target.closest("textarea")) return;
+          if (target.closest("input")) return;
+          if (target.closest("select")) return;
+          if (target.closest(".context-body")) return;
+          void toggleAgentExpanded(agentMeta);
+        });
+
+        return card;
+      }
+
+      async function toggleAgentExpanded(agentMeta) {
+        const key = getAgentKey(
+          agentMeta.user,
+          agentMeta.group || AGENT_GROUP_UNSORTED_ID,
+          agentMeta.agent_slug
+        );
+        const current = state.expandedAgentKeyByProfile[state.activeProfile] || "";
+        if (current === key) {
+          const detail = state.agentDetailsByKey[key] || null;
+          const okToCollapse = await confirmDiscardAgentChangesIfNeeded({ detail });
+          if (!okToCollapse) return;
+          state.expandedAgentKeyByProfile[state.activeProfile] = "";
+          render();
+          return;
+        }
+
+        if (current && current !== key) {
+          const currentDetail = state.agentDetailsByKey[current] || null;
+          const okToSwitch = await confirmDiscardAgentChangesIfNeeded({
+            detail: currentDetail,
+          });
+          if (!okToSwitch) return;
+        }
+
+        state.expandedAgentKeyByProfile[state.activeProfile] = key;
+        render();
+        try {
+          await loadAgentDetail(
+            agentMeta.user,
+            agentMeta.group || AGENT_GROUP_UNSORTED_ID,
+            agentMeta.agent_slug
+          );
+          if (state.activeMode === "agents") {
+            render();
+          }
+        } catch (_err) {
+          setStatus("Could not load agent sections", true);
+        }
+      }
+
+      async function deleteAgentItem(agentMeta) {
+        const choice = await askChoiceDialog({
+          title: "Delete this agent?",
+          message: "This will remove all section files for this agent.",
+          primaryLabel: "Delete Agent",
+          secondaryLabel: "Cancel",
+        });
+        if (choice !== "primary") return;
+
+        try {
+          const response = await fetch("/agents/delete", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              user: agentMeta.user,
+              group: agentMeta.group || AGENT_GROUP_UNSORTED_ID,
+              agent: agentMeta.agent_slug,
+            }),
+          });
+          if (!response.ok) throw new Error("Delete failed");
+
+          const list = getActiveAgents().filter(
+            (item) =>
+              !(
+                item.user === agentMeta.user &&
+                (item.group || AGENT_GROUP_UNSORTED_ID) ===
+                  (agentMeta.group || AGENT_GROUP_UNSORTED_ID) &&
+                item.agent_slug === agentMeta.agent_slug
+              )
+          );
+          state.agentsByProfile[state.activeProfile] = list;
+          const key = getAgentKey(
+            agentMeta.user,
+            agentMeta.group || AGENT_GROUP_UNSORTED_ID,
+            agentMeta.agent_slug
+          );
+          delete state.agentDetailsByKey[key];
+          if (state.expandedAgentKeyByProfile[state.activeProfile] === key) {
+            state.expandedAgentKeyByProfile[state.activeProfile] = "";
+          }
+          render();
+          setStatus(`Deleted agent "${truncateStatusName(agentMeta.title)}"`);
+        } catch (_err) {
+          setStatus("Agent delete failed: Server may not be running", true);
+        }
+      }
+
       function render() {
         dom.blocksContainer.innerHTML = "";
         ensureActiveGroupIsValid();
+        ensureActiveAgentGroupIsValid();
         renderGroups();
+        dom.btnAdd.hidden = state.activeMode !== "prompts";
+        dom.btnAddGroup.hidden = state.activeMode !== "prompts";
+        syncSearchInputFromState();
         updateCountLabel();
+        if (state.activeMode === "agents") {
+          const visibleAgents = getVisibleAgents();
+          if (!visibleAgents.length) {
+            const empty = document.createElement("div");
+            empty.className = "empty-state";
+            if (getActiveSearchTerm().trim()) {
+              empty.textContent =
+                `No agents match "${getActiveSearchTerm().trim()}" in ${getActiveAgentGroupLabel()}.`;
+            } else if (getActiveAgentGroupId() === AGENT_GROUP_ALL_ID) {
+              empty.textContent = `No agents yet for ${getActiveProfileLabel()}.`;
+            } else {
+              empty.textContent = `No agents yet in ${getActiveAgentGroupLabel()}.`;
+            }
+            dom.blocksContainer.appendChild(empty);
+            return;
+          }
+
+          for (const agentMeta of visibleAgents) {
+            dom.blocksContainer.appendChild(createAgentElement(agentMeta));
+          }
+          return;
+        }
         const activeBlocks = getVisibleBlocks();
 
         if (!activeBlocks.length) {
@@ -1569,6 +2384,50 @@
       function updateDropMarker(card, insertBefore) {
         clearDropMarkers();
         card.classList.add(insertBefore ? "drop-before" : "drop-after");
+      }
+
+      function isAgentDetailDirty(detail, sectionOnly = false) {
+        if (!detail || !detail.dirtyBySection) return false;
+        if (sectionOnly) {
+          const section = detail.activeSection || "";
+          return !!(section && detail.dirtyBySection[section]);
+        }
+        return Object.values(detail.dirtyBySection).some(Boolean);
+      }
+
+      function discardAgentDetailDraft(detail, sectionOnly = false) {
+        if (!detail || !detail.draftBySection || !detail.savedBySection) return;
+        if (sectionOnly) {
+          const section = detail.activeSection || "";
+          if (!section) return;
+          detail.draftBySection[section] = detail.savedBySection[section] || "";
+          detail.dirtyBySection[section] = false;
+          return;
+        }
+        for (const section of Object.keys(detail.draftBySection)) {
+          detail.draftBySection[section] = detail.savedBySection[section] || "";
+          detail.dirtyBySection[section] = false;
+        }
+      }
+
+      async function confirmDiscardAgentChangesIfNeeded({ detail = null, sectionOnly = false } = {}) {
+        let targetDetail = detail;
+        if (!targetDetail) {
+          const expandedKey = state.expandedAgentKeyByProfile[state.activeProfile] || "";
+          targetDetail = expandedKey ? state.agentDetailsByKey[expandedKey] : null;
+        }
+        if (!targetDetail) return true;
+        if (!isAgentDetailDirty(targetDetail, sectionOnly)) return true;
+
+        const choice = await askChoiceDialog({
+          title: "Discard changes?",
+          message: "You have unsaved changes.",
+          primaryLabel: "Discard Changes",
+          secondaryLabel: "Keep Editing",
+        });
+        if (choice !== "primary") return false;
+        discardAgentDetailDraft(targetDetail, sectionOnly);
+        return true;
       }
 
       async function persistWithStatus(successMessage, errorMessage = "Autosave failed: Server may not be running") {
@@ -1949,7 +2808,11 @@
           switchProfile(dom.userSelect.value);
         });
         dom.searchInput.addEventListener("input", () => {
-          state.searchByProfile[state.activeProfile] = dom.searchInput.value;
+          if (state.activeMode === "agents") {
+            state.agentSearchByProfile[state.activeProfile] = dom.searchInput.value;
+          } else {
+            state.searchByProfile[state.activeProfile] = dom.searchInput.value;
+          }
           render();
         });
         dom.btnCancelDialog.addEventListener("click", closeDialog);
@@ -1978,6 +2841,7 @@
         }
         loadActiveProfileLocal();
         loadActiveGroupsLocal();
+        loadActiveAgentGroupsLocal();
         if (!state.configuredUsers.some((user) => user.id === state.activeProfile)) {
           state.activeProfile = state.configuredUsers[0].id;
         }
@@ -1991,7 +2855,15 @@
           }
           setStatus("Could not load from server", true);
         }
+        for (const user of state.configuredUsers) {
+          try {
+            await loadAgentsForProfile(user.id);
+          } catch (_err) {
+            state.agentsByProfile[user.id] = [];
+          }
+        }
         ensureActiveGroupIsValid();
+        ensureActiveAgentGroupIsValid();
         syncSearchInputFromState();
         render();
         if (!dom.statusText.textContent) {
