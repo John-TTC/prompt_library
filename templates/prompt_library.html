@@ -457,6 +457,35 @@
       line-height: 1.4;
     }
 
+    .prompt-inline-editor {
+      min-height: 190px;
+      background: #030712;
+      border: 1px solid #1f2937;
+      border-radius: 8px;
+      color: #d1d5db;
+      padding: 10px;
+      font-family: Consolas, "Courier New", monospace;
+      font-size: 12px;
+      line-height: 1.4;
+      resize: vertical;
+    }
+
+    .prompt-action-bar {
+      display: flex;
+      justify-content: flex-end;
+      gap: 8px;
+    }
+
+    .prompt-action-bar button {
+      font-size: 12px;
+      padding: 6px 10px;
+    }
+
+    .prompt-inline-editor.is-dirty {
+      border-color: #60a5fa;
+      background: rgba(30, 58, 138, 0.12);
+    }
+
     .empty-state {
       color: var(--muted);
       border: 1px dashed var(--border);
@@ -618,6 +647,18 @@
     </form>
   </dialog>
 
+  <dialog id="choiceDialog">
+    <form id="choiceForm" method="dialog" class="dialog-content">
+      <h2 id="choiceTitle" class="dialog-title">Confirm</h2>
+      <p id="choiceMessage" style="margin: 0; color: #cbd5e1; font-size: 14px;"></p>
+      <div class="dialog-actions">
+        <button type="button" id="choiceBtnSecondary"></button>
+        <button type="button" id="choiceBtnPrimary" class="btn-primary"></button>
+        <button type="button" id="choiceBtnTertiary"></button>
+      </div>
+    </form>
+  </dialog>
+
   <script>
     (() => {
       "use strict";
@@ -640,6 +681,12 @@
         groupSelect: document.getElementById("groupSelect"),
         btnCancelDialog: document.getElementById("btnCancelDialog"),
         userSelect: document.getElementById("userSelect"),
+        choiceDialog: document.getElementById("choiceDialog"),
+        choiceTitle: document.getElementById("choiceTitle"),
+        choiceMessage: document.getElementById("choiceMessage"),
+        choiceBtnPrimary: document.getElementById("choiceBtnPrimary"),
+        choiceBtnSecondary: document.getElementById("choiceBtnSecondary"),
+        choiceBtnTertiary: document.getElementById("choiceBtnTertiary"),
       };
 
       const GROUP_ALL_ID = "__all__";
@@ -1235,29 +1282,161 @@
         const bodyInner = document.createElement("div");
         bodyInner.className = "context-body-inner";
 
-        const pre = document.createElement("pre");
-        pre.className = "context-text";
-        pre.textContent = block.contextText;
+        const promptEditor = document.createElement("textarea");
+        promptEditor.className = "prompt-inline-editor";
+        promptEditor.value = block.contextText;
+        promptEditor.setAttribute("aria-label", `Prompt text for ${block.name}`);
 
-        const copyBtn = document.createElement("button");
-        copyBtn.type = "button";
-        copyBtn.draggable = false;
-        copyBtn.textContent = "Copy to clipboard";
+        const promptActionBar = document.createElement("div");
+        promptActionBar.className = "prompt-action-bar";
 
-        bodyInner.appendChild(pre);
-        bodyInner.appendChild(copyBtn);
+        const savePromptBtn = document.createElement("button");
+        savePromptBtn.type = "button";
+        savePromptBtn.draggable = false;
+        savePromptBtn.className = "btn-primary";
+        savePromptBtn.textContent = "Save";
+        savePromptBtn.disabled = true;
+
+        const copyPromptBtn = document.createElement("button");
+        copyPromptBtn.type = "button";
+        copyPromptBtn.draggable = false;
+        copyPromptBtn.textContent = "Copy to Clipboard";
+
+        const cancelPromptBtn = document.createElement("button");
+        cancelPromptBtn.type = "button";
+        cancelPromptBtn.draggable = false;
+        cancelPromptBtn.textContent = "Cancel";
+        cancelPromptBtn.disabled = true;
+
+        promptActionBar.appendChild(savePromptBtn);
+        promptActionBar.appendChild(copyPromptBtn);
+        promptActionBar.appendChild(cancelPromptBtn);
+
+        bodyInner.appendChild(promptEditor);
+        bodyInner.appendChild(promptActionBar);
         body.appendChild(collapseHitarea);
         body.appendChild(bodyInner);
 
-        function setExpanded(isOpen) {
+        let savedPromptText = block.contextText;
+        let isPromptDirty = false;
+
+        function updateInlinePromptState() {
+          savePromptBtn.disabled = !isPromptDirty;
+          cancelPromptBtn.disabled = !isPromptDirty;
+          promptEditor.classList.toggle("is-dirty", isPromptDirty);
+        }
+
+        function refreshDirtyFlag() {
+          isPromptDirty = promptEditor.value !== savedPromptText;
+          updateInlinePromptState();
+        }
+
+        async function persistInlinePromptText() {
+          refreshDirtyFlag();
+          if (!isPromptDirty) return true;
+
+          const activeBlocks = getActiveBlocks();
+          const idx = activeBlocks.findIndex((item) => item.id === block.id);
+          if (idx < 0) return false;
+
+          const previousBlocks = cloneBlocks(activeBlocks);
+          activeBlocks[idx] = {
+            ...activeBlocks[idx],
+            contextText: promptEditor.value,
+            updatedAt: nowIso(),
+          };
+          setActiveBlocks(activeBlocks);
+          block.contextText = promptEditor.value;
+          savedPromptText = promptEditor.value;
+          isPromptDirty = false;
+          updateInlinePromptState();
+          setUndoSnapshot(
+            previousBlocks,
+            `Restored "${truncateStatusName(block.name)}"`
+          );
+
+          try {
+            await saveToServer();
+            setStatus(`Saved "${truncateStatusName(block.name)}"`);
+            return true;
+          } catch (_err) {
+            setStatus("Autosave failed: Server may not be running", true);
+            return false;
+          }
+        }
+
+        async function confirmDiscardPromptChanges() {
+          if (!isPromptDirty) return true;
+          const choice = await askChoiceDialog({
+            title: "Discard changes?",
+            message: "You have unsaved changes.",
+            primaryLabel: "Discard Changes",
+            secondaryLabel: "Keep Editing",
+          });
+          if (choice !== "primary") return false;
+          promptEditor.value = savedPromptText;
+          isPromptDirty = false;
+          updateInlinePromptState();
+          return true;
+        }
+
+        async function copyPromptTextWithDirtyHandling(anchorEl) {
+          refreshDirtyFlag();
+          if (!isPromptDirty) {
+            await copyText(
+              promptEditor.value,
+              `Copied "${block.name}" to clipboard.`,
+              anchorEl
+            );
+            return;
+          }
+
+          const choice = await askChoiceDialog({
+            title: "You have unsaved changes.",
+            message: "Choose how to copy this prompt text.",
+            primaryLabel: "Save and Copy",
+            secondaryLabel: "Cancel",
+            tertiaryLabel: "Copy Without Saving",
+          });
+
+          if (choice === "primary") {
+            const saved = await persistInlinePromptText();
+            if (!saved) return;
+            await copyText(
+              promptEditor.value,
+              `Copied "${block.name}" to clipboard.`,
+              anchorEl
+            );
+            return;
+          }
+
+          if (choice === "tertiary") {
+            await copyText(
+              promptEditor.value,
+              `Copied "${block.name}" to clipboard.`,
+              anchorEl
+            );
+          }
+        }
+
+        function syncCardDraggable() {
+          card.draggable = !body.classList.contains("open");
+        }
+
+        async function setExpanded(isOpen) {
+          if (!isOpen && body.classList.contains("open")) {
+            const okToClose = await confirmDiscardPromptChanges();
+            if (!okToClose) return;
+          }
           body.classList.toggle("open", isOpen);
           arrowBtn.setAttribute("aria-expanded", String(isOpen));
           arrowBtn.innerHTML = isOpen ? "&#9652;" : "&#9662;";
+          syncCardDraggable();
         }
 
         arrowBtn.addEventListener("click", (event) => {
           event.stopPropagation();
-          setExpanded(!body.classList.contains("open"));
+          void setExpanded(!body.classList.contains("open"));
         });
 
         card.addEventListener("click", (event) => {
@@ -1266,21 +1445,39 @@
           if (target.closest("button")) return;
           if (target.closest(".row-actions")) return;
           if (target.closest(".context-body")) return;
-          setExpanded(!body.classList.contains("open"));
+          void setExpanded(!body.classList.contains("open"));
         });
 
         quickCopyBtn.addEventListener("click", (event) =>
           copyText(block.contextText, `Copied "${block.name}" to clipboard.`, event.currentTarget)
         );
-        copyBtn.addEventListener("click", () =>
-          copyText(block.contextText, `Copied "${block.name}" to clipboard.`, pre)
-        );
+
+        savePromptBtn.addEventListener("click", () => {
+          void persistInlinePromptText();
+        });
+        copyPromptBtn.addEventListener("click", () => {
+          void copyPromptTextWithDirtyHandling(copyPromptBtn);
+        });
+        cancelPromptBtn.addEventListener("click", () => {
+          void confirmDiscardPromptChanges();
+        });
+        promptEditor.addEventListener("input", refreshDirtyFlag);
 
         editBtn.addEventListener("click", () => openEditDialog(block.id));
         deleteBtn.addEventListener("click", () => deleteBlock(block.id));
 
         card.addEventListener("dragstart", (event) => {
-          if (event.target && event.target.closest("button")) {
+          if (body.classList.contains("open")) {
+            event.preventDefault();
+            return;
+          }
+          if (
+            event.target &&
+            (event.target.closest("button") ||
+              event.target.closest("textarea") ||
+              event.target.closest("input") ||
+              event.target.closest("select"))
+          ) {
             event.preventDefault();
             return;
           }
@@ -1325,6 +1522,7 @@
 
         card.appendChild(header);
         card.appendChild(body);
+        syncCardDraggable();
         return card;
       }
 
@@ -1523,6 +1721,60 @@
 
       function closeDialog() {
         if (dom.contextDialog.open) dom.contextDialog.close();
+      }
+
+      function askChoiceDialog({
+        title = "Confirm",
+        message = "",
+        primaryLabel = "OK",
+        secondaryLabel = "Cancel",
+        tertiaryLabel = "",
+      }) {
+        return new Promise((resolve) => {
+          dom.choiceTitle.textContent = title;
+          dom.choiceMessage.textContent = message;
+          dom.choiceBtnPrimary.textContent = primaryLabel;
+          dom.choiceBtnSecondary.textContent = secondaryLabel;
+          dom.choiceBtnTertiary.textContent = tertiaryLabel || "";
+          dom.choiceBtnTertiary.hidden = !tertiaryLabel;
+
+          let settled = false;
+          const settle = (value) => {
+            if (settled) return;
+            settled = true;
+            if (dom.choiceDialog.open) {
+              dom.choiceDialog.close();
+            }
+            cleanup();
+            resolve(value);
+          };
+
+          const onPrimary = () => settle("primary");
+          const onSecondary = () => settle("secondary");
+          const onTertiary = () => settle("tertiary");
+          const onCancel = (event) => {
+            event.preventDefault();
+            settle("secondary");
+          };
+          const onClose = () => {
+            settle("secondary");
+          };
+
+          const cleanup = () => {
+            dom.choiceBtnPrimary.removeEventListener("click", onPrimary);
+            dom.choiceBtnSecondary.removeEventListener("click", onSecondary);
+            dom.choiceBtnTertiary.removeEventListener("click", onTertiary);
+            dom.choiceDialog.removeEventListener("cancel", onCancel);
+            dom.choiceDialog.removeEventListener("close", onClose);
+          };
+
+          dom.choiceBtnPrimary.addEventListener("click", onPrimary);
+          dom.choiceBtnSecondary.addEventListener("click", onSecondary);
+          dom.choiceBtnTertiary.addEventListener("click", onTertiary);
+          dom.choiceDialog.addEventListener("cancel", onCancel);
+          dom.choiceDialog.addEventListener("close", onClose);
+          dom.choiceDialog.showModal();
+        });
       }
 
       function upsertFromDialog() {
