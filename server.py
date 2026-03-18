@@ -143,13 +143,57 @@ def create_agent_group():
     payload = request.get_json(force=True) or {}
     user = str(payload.get("user", "")).strip()
     group = str(payload.get("group", "")).strip()
+    label = str(payload.get("label", "")).strip()
     if not user or not group:
         return jsonify({"error": "Missing user/group"}), 400
     try:
-        result = agent_service.create_agent_group(AGENTS_ROOT, user, group)
+        result = agent_service.create_agent_group(
+            AGENTS_ROOT,
+            user=user,
+            group=group,
+            label=label,
+        )
     except ValueError as err:
         return jsonify({"error": str(err)}), 400
-    return jsonify({"ok": True, **result})
+    return jsonify({"ok": True, "group": result.get("group")})
+
+
+@app.route("/agents/groups/reorder", methods=["POST"])
+def reorder_agent_groups():
+    payload = request.get_json(force=True) or {}
+    user = str(payload.get("user", "")).strip()
+    order = payload.get("order", [])
+    if not user:
+        return jsonify({"error": "Missing user"}), 400
+    if not isinstance(order, list):
+        return jsonify({"error": "Invalid order"}), 400
+    try:
+        result = agent_service.reorder_agent_groups(
+            AGENTS_ROOT,
+            user=user,
+            ordered_group_keys=order,
+        )
+    except ValueError as err:
+        return jsonify({"error": str(err)}), 400
+    return jsonify(result)
+
+
+@app.route("/agents/groups/delete", methods=["POST"])
+def delete_agent_group():
+    payload = request.get_json(force=True) or {}
+    user = str(payload.get("user", "")).strip()
+    group = str(payload.get("group", "")).strip()
+    if not user or not group:
+        return jsonify({"error": "Missing user/group"}), 400
+    try:
+        result = agent_service.delete_agent_group(AGENTS_ROOT, user=user, group=group)
+    except ValueError as err:
+        return jsonify({"error": str(err)}), 400
+    except FileNotFoundError as err:
+        return jsonify({"error": str(err)}), 404
+    except FileExistsError as err:
+        return jsonify({"error": str(err)}), 409
+    return jsonify(result)
 
 
 @app.route("/agents/load", methods=["GET"])

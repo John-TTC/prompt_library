@@ -1,12 +1,18 @@
 import json
 import re
 import shutil
+from datetime import datetime, timezone
 from pathlib import Path
 
 
 DEFAULT_SECTION_ORDER = ["role", "rules", "process", "output"]
 DEFAULT_AGENT_GROUP = "agent-group-unsorted"
 AGENT_GROUPS_FILE = "agent-groups.json"
+GROUPS_SCHEMA_VERSION = 1
+
+
+def _now_iso():
+    return datetime.now(timezone.utc).replace(microsecond=0).isoformat()
 
 
 def _slugify(value):
@@ -54,6 +60,11 @@ def _normalize_group_name(group):
     return _normalize_segment(group, "group")
 
 
+def _normalize_group_label(label, fallback):
+    text = str(label).strip()
+    return text or fallback
+
+
 def _collect_group_dirs(user_root):
     if not user_root.exists():
         return []
@@ -73,51 +84,152 @@ def _load_group_registry(user_root):
     if not groups_path.exists():
         return []
     payload = _read_json(groups_path)
-    raw_groups = payload.get("groups", [])
+    raw_groups = payload.get("groups", []) if isinstance(payload, dict) else []
     if not isinstance(raw_groups, list):
         return []
+
     cleaned = []
     seen = set()
-    for value in raw_groups:
+    for idx, value in enumerate(raw_groups):
+        if isinstance(value, dict):
+            key_raw = value.get("key", "")
+            label_raw = value.get("label", "")
+            order_raw = value.get("order")
+            created_at = str(value.get("createdAt", "")).strip() or None
+        else:
+            key_raw = value
+            label_raw = value
+            order_raw = idx
+            created_at = None
         try:
-            normalized = _normalize_group_name(value)
+            key = _normalize_group_name(key_raw)
         except ValueError:
             continue
-        if normalized in seen:
+        if key in seen:
             continue
-        seen.add(normalized)
-        cleaned.append(normalized)
+        seen.add(key)
+        order = order_raw if isinstance(order_raw, int) and order_raw >= 0 else idx
+        cleaned.append(
+            {
+                "key": key,
+                "label": _normalize_group_label(label_raw, key),
+                "order": order,
+                "createdAt": created_at,
+            }
+        )
+
+    cleaned.sort(key=lambda item: (item["order"], item["key"]))
+    for idx, item in enumerate(cleaned):
+        item["order"] = idx
     return cleaned
 
 
-def _save_group_registry(user_root, groups):
+def _save_group_registry(user_root, groups_meta):
     seen = set()
     cleaned = []
-    for value in groups:
+    for idx, value in enumerate(groups_meta):
+        if not isinstance(value, dict):
+            continue
         try:
-            normalized = _normalize_group_name(value)
+            key = _normalize_group_name(value.get("key", ""))
         except ValueError:
             continue
-        if normalized in seen:
+        if key in seen:
             continue
-        seen.add(normalized)
-        cleaned.append(normalized)
-    cleaned.sort()
-    payload = {"groups": cleaned}
+        seen.add(key)
+        label = _normalize_group_label(value.get("label", ""), key)
+        order_raw = value.get("order")
+        order = order_raw if isinstance(order_raw, int) and order_raw >= 0 else idx
+        created_at = str(value.get("createdAt", "")).strip() or None
+        cleaned.append(
+            {
+                "key": key,
+                "label": label,
+                "order": order,
+                "createdAt": created_at,
+            }
+        )
+
+    cleaned.sort(key=lambda item: (item["order"], item["key"]))
+    for idx, item in enumerate(cleaned):
+        item["order"] = idx
+
+    payload = {
+        "schemaVersion": GROUPS_SCHEMA_VERSION,
+        "groups": cleaned,
+    }
     if not user_root.exists():
         user_root.mkdir(parents=True, exist_ok=True)
     _write_json(_agent_groups_path(user_root), payload)
     return cleaned
 
 
-def _ensure_group_in_registry(root, user, group):
+def _sync_agent_groups(root, user):
     user_root, _ = _user_root(root, user)
+    user_root.mkdir(parents=True, exist_ok=True)
+    groups_meta = _load_group_registry(user_root)
+    by_key = {item["key"]: dict(item) for item in groups_meta}
+
+    changed = False
+    if DEFAULT_AGENT_GROUP not in by_key:
+        by_key[DEFAULT_AGENT_GROUP] = {
+            "key": DEFAULT_AGENT_GROUP,
+            "label": "Unsorted",
+            "order": len(by_key),
+            "createdAt": _now_iso(),
+        }
+        changed = True
+
+    discovered = sorted(_collect_group_dirs(user_root))
+    for key in discovered:
+        if key in by_key:
+            continue
+        by_key[key] = {
+            "key": key,
+            "label": key,
+            "order": len(by_key),
+            "createdAt": _now_iso(),
+        }
+        changed = True
+
+    groups_sorted = sorted(by_key.values(), key=lambda item: (item.get("order", 0), item["key"]))
+    for idx, item in enumerate(groups_sorted):
+        if item.get("order") != idx:
+            changed = True
+        item["order"] = idx
+
+    # Keep folders aligned with metadata entries.
+    for item in groups_sorted:
+        group_dir = user_root / item["key"]
+        _ensure_within_root(root, group_dir)
+        if not group_dir.exists():
+            group_dir.mkdir(parents=True, exist_ok=True)
+            changed = True
+
+    if changed:
+        groups_sorted = _save_group_registry(user_root, groups_sorted)
+    return groups_sorted
+
+
+def _ensure_group_in_registry(root, user, group, label=""):
+    groups = _sync_agent_groups(root, user)
     normalized_group = _normalize_group_name(group)
-    groups = _load_group_registry(user_root)
-    if normalized_group in groups:
+    if any(item["key"] == normalized_group for item in groups):
         return groups
-    groups.append(normalized_group)
-    return _save_group_registry(user_root, groups)
+    groups.append(
+        {
+            "key": normalized_group,
+            "label": _normalize_group_label(label, normalized_group),
+            "order": len(groups),
+            "createdAt": _now_iso(),
+        }
+    )
+    user_root, _ = _user_root(root, user)
+    saved = _save_group_registry(user_root, groups)
+    group_dir = user_root / normalized_group
+    _ensure_within_root(root, group_dir)
+    group_dir.mkdir(parents=True, exist_ok=True)
+    return saved
 
 
 def _agent_json_path(agent_dir):
@@ -169,8 +281,8 @@ def _write_text(path, content):
 
 def list_agents(agents_root, user):
     root = Path(agents_root)
-    user_norm = _normalize_segment(user, "user")
-    user_root = root / user_norm
+    user_root, user_norm = _user_root(root, user)
+    _sync_agent_groups(root, user_norm)
     if not user_root.exists():
         return []
 
@@ -207,7 +319,7 @@ def list_agents(agents_root, user):
                     "title": payload.get("title", agent_dir.name),
                     "description": payload.get("description", ""),
                     "user": payload.get("user", user_norm),
-                    "group": payload.get("group", group_norm),
+                    "group": group_norm,
                     "agent_slug": _normalize_segment(agent_dir.name, "agent"),
                     "section_order": section_order,
                 }
@@ -219,34 +331,65 @@ def list_agents(agents_root, user):
 
 def list_agent_groups(agents_root, user):
     root = Path(agents_root)
+    groups = _sync_agent_groups(root, user)
+    return [dict(item) for item in groups]
+
+
+def create_agent_group(agents_root, user, group, label=""):
+    root = Path(agents_root)
+    groups = _sync_agent_groups(root, user)
+    group_norm = _normalize_group_name(group)
+    if any(item["key"] == group_norm for item in groups):
+        raise ValueError("Group already exists")
+    groups.append(
+        {
+            "key": group_norm,
+            "label": _normalize_group_label(label, group_norm),
+            "order": len(groups),
+            "createdAt": _now_iso(),
+        }
+    )
     user_root, _ = _user_root(root, user)
-    persisted = _load_group_registry(user_root)
-    discovered = _collect_group_dirs(user_root)
-
-    seen = set()
-    groups = []
-    for name in [DEFAULT_AGENT_GROUP, *persisted, *discovered]:
-        try:
-            normalized = _normalize_group_name(name)
-        except ValueError:
-            continue
-        if normalized in seen:
-            continue
-        seen.add(normalized)
-        groups.append(normalized)
-    return groups
+    saved = _save_group_registry(user_root, groups)
+    group_dir = user_root / group_norm
+    _ensure_within_root(root, group_dir)
+    group_dir.mkdir(parents=True, exist_ok=True)
+    created = next((item for item in saved if item["key"] == group_norm), None)
+    return {"group": created or {"key": group_norm, "label": group_norm, "order": 0, "createdAt": None}}
 
 
-def create_agent_group(agents_root, user, group):
+def reorder_agent_groups(agents_root, user, ordered_group_keys):
     root = Path(agents_root)
     user_root, _ = _user_root(root, user)
-    group_norm = _normalize_group_name(group)
-    groups = _load_group_registry(user_root)
-    if group_norm in groups:
-        raise ValueError("Group already exists")
-    groups.append(group_norm)
-    _save_group_registry(user_root, groups)
-    return {"group": group_norm}
+    groups = _sync_agent_groups(root, user)
+
+    requested = []
+    seen = set()
+    if isinstance(ordered_group_keys, list):
+        for value in ordered_group_keys:
+            try:
+                key = _normalize_group_name(value)
+            except ValueError:
+                continue
+            if key in seen:
+                continue
+            seen.add(key)
+            requested.append(key)
+
+    by_key = {item["key"]: dict(item) for item in groups}
+    ordered = []
+    for key in requested:
+        if key in by_key:
+            ordered.append(by_key[key])
+            del by_key[key]
+    for item in sorted(by_key.values(), key=lambda value: (value.get("order", 0), value["key"])):
+        ordered.append(item)
+
+    for idx, item in enumerate(ordered):
+        item["order"] = idx
+
+    saved = _save_group_registry(user_root, ordered)
+    return {"ok": True, "groups": saved}
 
 
 def load_agent(agents_root, user, group, agent_slug):
@@ -436,6 +579,57 @@ def move_agent_to_group(agents_root, user, from_group, agent_slug, to_group):
 
     _ensure_group_in_registry(root, user, to_group_norm)
     return {"ok": True, "group": to_group_norm, "agent_slug": agent_norm}
+
+
+def delete_agent_group(agents_root, user, group):
+    root = Path(agents_root)
+    user_root, _ = _user_root(root, user)
+    group_norm = _normalize_group_name(group)
+    if group_norm == DEFAULT_AGENT_GROUP:
+        raise ValueError("Cannot delete Unsorted")
+
+    groups = _sync_agent_groups(root, user)
+    group_entry = next((item for item in groups if item["key"] == group_norm), None)
+    if not group_entry:
+        raise FileNotFoundError("Group not found")
+
+    source_dir = user_root / group_norm
+    unsorted_dir = user_root / DEFAULT_AGENT_GROUP
+    _ensure_within_root(root, source_dir)
+    _ensure_within_root(root, unsorted_dir)
+    unsorted_dir.mkdir(parents=True, exist_ok=True)
+
+    moved = 0
+    if source_dir.exists():
+        for child in list(source_dir.iterdir()):
+            if not child.is_dir():
+                continue
+            agent_json = _agent_json_path(child)
+            if not agent_json.exists():
+                continue
+            target = unsorted_dir / child.name
+            _ensure_within_root(root, target)
+            if target.exists():
+                raise FileExistsError(f"Target already has agent: {child.name}")
+            shutil.move(str(child), str(target))
+            moved += 1
+
+            moved_json = _agent_json_path(target)
+            payload = _read_json(moved_json)
+            payload["group"] = DEFAULT_AGENT_GROUP
+            _write_json(moved_json, payload)
+
+        try:
+            source_dir.rmdir()
+        except OSError:
+            pass
+
+    next_groups = [item for item in groups if item["key"] != group_norm]
+    for idx, item in enumerate(next_groups):
+        item["order"] = idx
+    _save_group_registry(user_root, next_groups)
+    _sync_agent_groups(root, user)
+    return {"ok": True, "moved_agents": moved, "group": group_norm}
 
 
 def delete_agent(agents_root, user, group, agent_slug):

@@ -18,10 +18,14 @@ The project is currently a hybrid local app with:
 - Stage 4: First visible agent UI layer (done)
 - Stage 5: Agent construct behavior (done)
 - Stage 5.1: Agent creation + section add flow + agent groups (done)
+- Stage 5.2: Prompt/Agent group parity (create, reorder, context-menu delete) (done)
 
 ### Prompt features currently available
 
 - Prompt groups (including `All` and `Unsorted`) per user
+- Prompt group creation from `+ Group`
+- Prompt group drag-reorder (Prompt groups only)
+- Prompt group delete via right-click context menu (moves prompts to `Unsorted`)
 - Search/filter by prompt group
 - Expand/collapse prompt cards
 - Inline prompt text editing in expanded cards
@@ -36,7 +40,9 @@ The project is currently a hybrid local app with:
 - Agent navigation/filter presence in left nav
 - Agent list rendering by active user/group
 - Agent group creation in Agent mode (`+ Group`)
-- Agent groups persisted separately from prompt groups (including empty groups)
+- Agent group drag-reorder (Agent groups only)
+- Agent group delete via right-click context menu (moves agents to `Unsorted`)
+- Agent groups persisted as metadata + real folders (including empty groups)
 - Agent drag/drop assignment to Agent groups in sidebar
 - Expand/collapse agent cards
 - Multiple agent cards can remain expanded at once
@@ -60,6 +66,7 @@ The project is currently a hybrid local app with:
 - Agent zip export (Stage 6)
 - Character/token counts (Stage 7)
 - Agent section rename/reorder/deletion UX
+- Agent group rename UX
 
 ## Architecture Notes
 
@@ -76,7 +83,7 @@ agents/<user>/<group>/<agent>/
   output.md
 
 agents/<user>/agent-groups.json
-  # persisted list of Agent groups (includes empty groups)
+  # persisted Agent-group metadata: key, label, order, optional createdAt
 ```
 
 Section keys are canonically handled as lowercase names (e.g. `role`, `rules`) with compatibility for legacy values like `role.md`.
