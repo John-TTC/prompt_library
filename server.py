@@ -126,6 +126,32 @@ def get_agents():
     return jsonify({"agents": items})
 
 
+@app.route("/agents/groups", methods=["GET"])
+def get_agent_groups():
+    user = request.args.get("user", "").strip()
+    if not user:
+        return jsonify({"error": "Missing user"}), 400
+    try:
+        groups = agent_service.list_agent_groups(AGENTS_ROOT, user)
+    except ValueError as err:
+        return jsonify({"error": str(err)}), 400
+    return jsonify({"groups": groups})
+
+
+@app.route("/agents/groups/create", methods=["POST"])
+def create_agent_group():
+    payload = request.get_json(force=True) or {}
+    user = str(payload.get("user", "")).strip()
+    group = str(payload.get("group", "")).strip()
+    if not user or not group:
+        return jsonify({"error": "Missing user/group"}), 400
+    try:
+        result = agent_service.create_agent_group(AGENTS_ROOT, user, group)
+    except ValueError as err:
+        return jsonify({"error": str(err)}), 400
+    return jsonify({"ok": True, **result})
+
+
 @app.route("/agents/load", methods=["GET"])
 def load_agent():
     user = request.args.get("user", "").strip()
@@ -199,6 +225,30 @@ def save_agent_section():
     return jsonify(result)
 
 
+@app.route("/agents/section/add", methods=["POST"])
+def add_agent_section():
+    payload = request.get_json(force=True) or {}
+    user = str(payload.get("user", "")).strip()
+    group = str(payload.get("group", "")).strip()
+    agent_slug = str(payload.get("agent", "")).strip()
+    section = str(payload.get("section", "")).strip()
+    if not user or not group or not agent_slug or not section:
+        return jsonify({"error": "Missing user/group/agent/section"}), 400
+    try:
+        result = agent_service.add_section(
+            AGENTS_ROOT,
+            user=user,
+            group=group,
+            agent_slug=agent_slug,
+            section_name=section,
+        )
+    except ValueError as err:
+        return jsonify({"error": str(err)}), 400
+    except FileNotFoundError as err:
+        return jsonify({"error": str(err)}), 404
+    return jsonify(result)
+
+
 @app.route("/agents/delete", methods=["POST"])
 def delete_agent():
     payload = request.get_json(force=True) or {}
@@ -218,6 +268,32 @@ def delete_agent():
         return jsonify({"error": str(err)}), 400
     except FileNotFoundError as err:
         return jsonify({"error": str(err)}), 404
+    return jsonify(result)
+
+
+@app.route("/agents/move", methods=["POST"])
+def move_agent():
+    payload = request.get_json(force=True) or {}
+    user = str(payload.get("user", "")).strip()
+    from_group = str(payload.get("from_group", "")).strip()
+    to_group = str(payload.get("to_group", "")).strip()
+    agent_slug = str(payload.get("agent", "")).strip()
+    if not user or not from_group or not to_group or not agent_slug:
+        return jsonify({"error": "Missing user/from_group/to_group/agent"}), 400
+    try:
+        result = agent_service.move_agent_to_group(
+            AGENTS_ROOT,
+            user=user,
+            from_group=from_group,
+            to_group=to_group,
+            agent_slug=agent_slug,
+        )
+    except ValueError as err:
+        return jsonify({"error": str(err)}), 400
+    except FileNotFoundError as err:
+        return jsonify({"error": str(err)}), 404
+    except FileExistsError as err:
+        return jsonify({"error": str(err)}), 409
     return jsonify(result)
 
 @app.route("/webhook/agentmail", methods=["POST"])

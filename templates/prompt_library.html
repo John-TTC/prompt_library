@@ -298,6 +298,22 @@
       box-shadow: inset 0 0 0 1px rgba(147, 197, 253, 0.35);
     }
 
+    .agent-tab-btn.add-tab {
+      min-width: 30px;
+      font-weight: 700;
+      padding-inline: 10px;
+    }
+
+    .agent-tab-input {
+      width: 150px;
+      padding: 5px 8px;
+      font-size: 11px;
+      border-radius: 7px;
+      background: #030712;
+      color: #d1d5db;
+      border: 1px solid #374151;
+    }
+
     .agent-section-meta {
       font-size: 12px;
       color: #9ca3af;
@@ -668,6 +684,7 @@
         <div class="list-controls">
           <input id="searchInput" type="search" placeholder="Search prompts..." />
           <button id="btnAdd" class="btn-primary">+ New Prompt</button>
+          <button id="btnAddAgent" class="btn-primary" hidden>Add Agent</button>
         </div>
       </div>
       <div id="statusMessage" class="list-status">
@@ -734,6 +751,20 @@
     </form>
   </dialog>
 
+  <dialog id="agentCreateDialog">
+    <form id="agentCreateForm" method="dialog" class="dialog-content">
+      <h2 class="dialog-title">Create Agent</h2>
+      <label>
+        Agent Name
+        <input id="agentNameInput" name="agentName" maxlength="120" required />
+      </label>
+      <div class="dialog-actions">
+        <button type="button" id="btnCancelAgentCreate">Cancel</button>
+        <button type="submit" id="btnCreateAgent" class="btn-primary">Create Agent</button>
+      </div>
+    </form>
+  </dialog>
+
   <script>
     (() => {
       "use strict";
@@ -747,6 +778,7 @@
         searchInput: document.getElementById("searchInput"),
         btnAddGroup: document.getElementById("btnAddGroup"),
         btnAdd: document.getElementById("btnAdd"),
+        btnAddAgent: document.getElementById("btnAddAgent"),
         contextDialog: document.getElementById("contextDialog"),
         contextForm: document.getElementById("contextForm"),
         dialogTitle: document.getElementById("dialogTitle"),
@@ -768,6 +800,10 @@
         btnConstructCancel: document.getElementById("btnConstructCancel"),
         btnConstructCopy: document.getElementById("btnConstructCopy"),
         btnConstructOk: document.getElementById("btnConstructOk"),
+        agentCreateDialog: document.getElementById("agentCreateDialog"),
+        agentCreateForm: document.getElementById("agentCreateForm"),
+        agentNameInput: document.getElementById("agentNameInput"),
+        btnCancelAgentCreate: document.getElementById("btnCancelAgentCreate"),
       };
 
       const GROUP_ALL_ID = "__all__";
@@ -783,6 +819,7 @@
         profiles: {},
         groups: {},
         agentsByProfile: {},
+        agentGroupsByProfile: {},
         agentDetailsByKey: {},
         activeProfile: "default",
         activeMode: "prompts",
@@ -792,6 +829,7 @@
         searchByProfile: {},
         agentSearchByProfile: {},
         promptUiByProfile: {},
+        pendingAgentEditorFocus: null,
         editingId: null,
         undoSnapshot: null,
         undoStatusMessage: "",
@@ -799,6 +837,7 @@
 
       const dragState = {
         draggedId: null,
+        draggedType: "",
       };
 
       function initProfileState(profileId) {
@@ -809,6 +848,9 @@
           state.groups[profileId] = ensureDefaultGroup(state.groups[profileId]);
         }
         if (!state.agentsByProfile[profileId]) state.agentsByProfile[profileId] = [];
+        if (!Array.isArray(state.agentGroupsByProfile[profileId])) {
+          state.agentGroupsByProfile[profileId] = [AGENT_GROUP_UNSORTED_ID];
+        }
         if (!state.activeGroupByProfile[profileId]) {
           state.activeGroupByProfile[profileId] = GROUP_ALL_ID;
         }
@@ -933,7 +975,22 @@
       function normalizeSectionKey(value) {
         const raw = String(value || "").trim().toLowerCase();
         if (!raw) return "";
-        return raw.replace(/\.md$/, "").replace(/-md$/, "").replace(/_md$/, "");
+        const noSuffix = raw.replace(/\.md$/, "").replace(/-md$/, "").replace(/_md$/, "");
+        return noSuffix.replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+      }
+
+      function slugifyName(value) {
+        return String(value || "")
+          .trim()
+          .toLowerCase()
+          .replace(/[^a-z0-9]+/g, "-")
+          .replace(/^-+|-+$/g, "");
+      }
+
+      function resolveCreateAgentGroupId() {
+        const selectedGroup = getActiveAgentGroupId();
+        if (selectedGroup === AGENT_GROUP_ALL_ID) return AGENT_GROUP_UNSORTED_ID;
+        return selectedGroup || AGENT_GROUP_UNSORTED_ID;
       }
 
       function formatSectionLabel(sectionKey) {
@@ -964,6 +1021,31 @@
           if (item) normalized.push(item);
         }
         state.agentsByProfile[profileId] = normalized;
+      }
+
+      function normalizeAgentGroups(listRaw) {
+        const seen = new Set();
+        const normalized = [AGENT_GROUP_UNSORTED_ID];
+        seen.add(AGENT_GROUP_UNSORTED_ID);
+        if (Array.isArray(listRaw)) {
+          for (const entry of listRaw) {
+            const value = slugifyName(entry);
+            if (!value || value === AGENT_GROUP_UNSORTED_ID || seen.has(value)) continue;
+            seen.add(value);
+            normalized.push(value);
+          }
+        }
+        return normalized;
+      }
+
+      async function loadAgentGroupsForProfile(profileId) {
+        const response = await fetch(
+          `/agents/groups?user=${encodeURIComponent(profileId)}`,
+          { cache: "no-store" }
+        );
+        if (!response.ok) throw new Error("Agent groups load failed");
+        const parsed = await response.json();
+        state.agentGroupsByProfile[profileId] = normalizeAgentGroups(parsed.groups);
       }
 
       async function loadAgentDetail(user, group, agentSlug) {
@@ -1092,6 +1174,10 @@
         return state.agentsByProfile[state.activeProfile] || [];
       }
 
+      function getActiveAgentGroups() {
+        return normalizeAgentGroups(state.agentGroupsByProfile[state.activeProfile] || []);
+      }
+
       function getActiveModeSearchTerm() {
         if (state.activeMode === "agents") {
           return state.agentSearchByProfile[state.activeProfile] || "";
@@ -1214,6 +1300,16 @@
         }
         ensureActiveGroupIsValid();
         ensureActiveAgentGroupIsValid();
+        void loadAgentGroupsForProfile(profileId).then(() => {
+          if (state.activeProfile === profileId && state.activeMode === "agents") {
+            ensureActiveAgentGroupIsValid();
+            render();
+          }
+        }).catch(() => {
+          if (state.activeProfile === profileId && state.activeMode === "agents") {
+            setStatus("Could not load agent groups from server", true);
+          }
+        });
         void loadAgentsForProfile(profileId).then(() => {
           if (state.activeProfile === profileId && state.activeMode === "agents") {
             render();
@@ -1405,6 +1501,9 @@
 
       function getAgentGroupBuckets() {
         const groups = new Map();
+        for (const groupName of getActiveAgentGroups()) {
+          if (!groups.has(groupName)) groups.set(groupName, 0);
+        }
         for (const agent of getActiveAgents()) {
           const groupName = agent.group || AGENT_GROUP_UNSORTED_ID;
           if (!groups.has(groupName)) groups.set(groupName, 0);
@@ -1435,7 +1534,7 @@
         const groupId = getActiveAgentGroupId();
         if (groupId === AGENT_GROUP_ALL_ID) return;
         if (groupId === AGENT_GROUP_UNSORTED_ID) return;
-        const exists = getAgentGroupBuckets().some((group) => group.name === groupId);
+        const exists = getActiveAgentGroups().includes(groupId);
         if (!exists) {
           setActiveAgentGroupId(AGENT_GROUP_ALL_ID);
         }
@@ -1606,42 +1705,42 @@
           setStatus(`Showing all agents for ${getActiveProfileLabel()}`);
           })();
         });
+        wireAgentGroupDropTarget(agentAllButton, AGENT_GROUP_ALL_ID);
         dom.groupsContainer.appendChild(agentAllButton);
 
         const agentGroups = getAgentGroupBuckets();
         const unsortedCount = getActiveAgents().filter(
           (agent) => !agent.group || agent.group === AGENT_GROUP_UNSORTED_ID
         ).length;
-        if (unsortedCount > 0) {
-          const unsortedBtn = document.createElement("button");
-          unsortedBtn.type = "button";
-          unsortedBtn.className =
-            "group-item" +
-            (state.activeMode === "agents" &&
-            getActiveAgentGroupId() === AGENT_GROUP_UNSORTED_ID
-              ? " active"
-              : "");
-          unsortedBtn.innerHTML =
-            `<span class="group-name">Unsorted</span><span class="group-count">${unsortedCount}</span>`;
-          unsortedBtn.addEventListener("click", () => {
-            void (async () => {
-            if (
-              state.activeMode === "agents" &&
-              getActiveAgentGroupId() !== AGENT_GROUP_UNSORTED_ID
-            ) {
-              const okToSwitch = await confirmDiscardAgentChangesIfNeeded();
-              if (!okToSwitch) return;
-            }
-            state.activeMode = "agents";
-            setActiveAgentGroupId(AGENT_GROUP_UNSORTED_ID);
-            saveActiveAgentGroupsLocal();
-            syncSearchInputFromState();
-            render();
-            setStatus(`Viewing ${getActiveProfileLabel()}'s unsorted agents`);
-            })();
-          });
-          dom.groupsContainer.appendChild(unsortedBtn);
-        }
+        const unsortedBtn = document.createElement("button");
+        unsortedBtn.type = "button";
+        unsortedBtn.className =
+          "group-item" +
+          (state.activeMode === "agents" &&
+          getActiveAgentGroupId() === AGENT_GROUP_UNSORTED_ID
+            ? " active"
+            : "");
+        unsortedBtn.innerHTML =
+          `<span class="group-name">Unsorted</span><span class="group-count">${unsortedCount}</span>`;
+        unsortedBtn.addEventListener("click", () => {
+          void (async () => {
+          if (
+            state.activeMode === "agents" &&
+            getActiveAgentGroupId() !== AGENT_GROUP_UNSORTED_ID
+          ) {
+            const okToSwitch = await confirmDiscardAgentChangesIfNeeded();
+            if (!okToSwitch) return;
+          }
+          state.activeMode = "agents";
+          setActiveAgentGroupId(AGENT_GROUP_UNSORTED_ID);
+          saveActiveAgentGroupsLocal();
+          syncSearchInputFromState();
+          render();
+          setStatus(`Viewing ${getActiveProfileLabel()}'s unsorted agents`);
+          })();
+        });
+        wireAgentGroupDropTarget(unsortedBtn, AGENT_GROUP_UNSORTED_ID);
+        dom.groupsContainer.appendChild(unsortedBtn);
 
         for (const agentGroup of agentGroups) {
           if (agentGroup.name === AGENT_GROUP_UNSORTED_ID) continue;
@@ -1672,13 +1771,14 @@
             setStatus(`Viewing ${getActiveProfileLabel()}'s ${agentGroup.name} agents`);
             })();
           });
+          wireAgentGroupDropTarget(button, agentGroup.name);
           dom.groupsContainer.appendChild(button);
         }
       }
 
       function wireGroupDropTarget(element, groupId) {
         element.addEventListener("dragover", (event) => {
-          if (!dragState.draggedId) return;
+          if (!dragState.draggedId || dragState.draggedType !== "prompt") return;
           if (groupId === GROUP_ALL_ID) return;
           event.preventDefault();
           if (event.dataTransfer) event.dataTransfer.dropEffect = "move";
@@ -1692,7 +1792,7 @@
         });
 
         element.addEventListener("drop", (event) => {
-          if (!dragState.draggedId) return;
+          if (!dragState.draggedId || dragState.draggedType !== "prompt") return;
           event.preventDefault();
           element.classList.remove("drop-target");
           if (groupId === GROUP_ALL_ID) {
@@ -1700,6 +1800,34 @@
             return;
           }
           moveBlockToGroup(dragState.draggedId, groupId);
+          clearDropMarkers();
+        });
+      }
+
+      function wireAgentGroupDropTarget(element, groupId) {
+        element.addEventListener("dragover", (event) => {
+          if (!dragState.draggedId || dragState.draggedType !== "agent") return;
+          if (groupId === AGENT_GROUP_ALL_ID) return;
+          event.preventDefault();
+          if (event.dataTransfer) event.dataTransfer.dropEffect = "move";
+          element.classList.add("drop-target");
+        });
+
+        element.addEventListener("dragleave", (event) => {
+          const related = event.relatedTarget;
+          if (related && element.contains(related)) return;
+          element.classList.remove("drop-target");
+        });
+
+        element.addEventListener("drop", (event) => {
+          if (!dragState.draggedId || dragState.draggedType !== "agent") return;
+          event.preventDefault();
+          element.classList.remove("drop-target");
+          if (groupId === AGENT_GROUP_ALL_ID) {
+            setStatus("Drop on a specific group to assign an agent");
+            return;
+          }
+          void moveAgentToGroup(dragState.draggedId, groupId);
           clearDropMarkers();
         });
       }
@@ -1997,6 +2125,7 @@
             return;
           }
           dragState.draggedId = block.id;
+          dragState.draggedType = "prompt";
           card.classList.add("dragging");
           if (event.dataTransfer) {
             event.dataTransfer.effectAllowed = "move";
@@ -2005,6 +2134,7 @@
         });
 
         card.addEventListener("dragover", (event) => {
+          if (dragState.draggedType !== "prompt") return;
           if (!dragState.draggedId || dragState.draggedId === block.id) return;
           event.preventDefault();
           if (event.dataTransfer) event.dataTransfer.dropEffect = "move";
@@ -2021,6 +2151,7 @@
         });
 
         card.addEventListener("drop", (event) => {
+          if (dragState.draggedType !== "prompt") return;
           if (!dragState.draggedId || dragState.draggedId === block.id) return;
           event.preventDefault();
           const rect = card.getBoundingClientRect();
@@ -2031,6 +2162,7 @@
 
         card.addEventListener("dragend", () => {
           dragState.draggedId = null;
+          dragState.draggedType = "";
           card.classList.remove("dragging");
           clearDropMarkers();
         });
@@ -2122,6 +2254,7 @@
         if (isExpanded && detail) {
           const tabs = document.createElement("div");
           tabs.className = "agent-tabs";
+          const hasPendingNewSection = !!detail.pendingNewSection;
           const activeSection = detail.activeSection || detail.sectionOrder[0] || "";
 
           for (const sectionName of detail.sectionOrder) {
@@ -2145,9 +2278,63 @@
             tabs.appendChild(tabBtn);
           }
 
+          const addTabBtn = document.createElement("button");
+          addTabBtn.type = "button";
+          addTabBtn.className = "agent-tab-btn add-tab";
+          addTabBtn.title = "Add section";
+          addTabBtn.textContent = "+";
+          addTabBtn.disabled = hasPendingNewSection;
+          addTabBtn.addEventListener("click", () => {
+            void (async () => {
+              const okToSwitch = await confirmDiscardAgentChangesIfNeeded({
+                detail,
+                sectionOnly: true,
+              });
+              if (!okToSwitch) return;
+              detail.pendingNewSection = {
+                value: "",
+                previousActiveSection: activeSection,
+              };
+              detail.activeSection = "";
+              render();
+            })();
+          });
+          tabs.appendChild(addTabBtn);
+
+          if (hasPendingNewSection) {
+            const tabInput = document.createElement("input");
+            tabInput.type = "text";
+            tabInput.className = "agent-tab-input";
+            tabInput.placeholder = "New section name";
+            tabInput.value = detail.pendingNewSection.value || "";
+            tabInput.addEventListener("input", () => {
+              if (!detail.pendingNewSection) return;
+              detail.pendingNewSection.value = tabInput.value;
+            });
+            tabInput.addEventListener("keydown", (event) => {
+              if (event.key === "Enter") {
+                event.preventDefault();
+                void confirmCreateAgentSection(agentMeta, detail);
+                return;
+              }
+              if (event.key === "Escape") {
+                event.preventDefault();
+                cancelPendingNewSection(detail);
+                render();
+              }
+            });
+            tabs.appendChild(tabInput);
+            window.setTimeout(() => {
+              tabInput.focus();
+              tabInput.select();
+            }, 0);
+          }
+
           const sectionMeta = document.createElement("div");
           sectionMeta.className = "agent-section-meta";
-          sectionMeta.textContent = activeSection
+          sectionMeta.textContent = hasPendingNewSection
+            ? "Name the new section, then press Enter"
+            : activeSection
             ? `${formatSectionLabel(activeSection) || activeSection} section`
             : "No sections";
 
@@ -2156,7 +2343,7 @@
           editor.value = activeSection
             ? detail.draftBySection[activeSection] || ""
             : "";
-          editor.disabled = !activeSection;
+          editor.disabled = !activeSection || hasPendingNewSection;
 
           const actionBar = document.createElement("div");
           actionBar.className = "agent-action-bar";
@@ -2169,7 +2356,7 @@
           const constructSectionBtn = document.createElement("button");
           constructSectionBtn.type = "button";
           constructSectionBtn.textContent = "Construct Section Prompt";
-          constructSectionBtn.disabled = !activeSection;
+          constructSectionBtn.disabled = !activeSection || hasPendingNewSection;
 
           const constructFullBtn = document.createElement("button");
           constructFullBtn.type = "button";
@@ -2184,8 +2371,8 @@
             const dirty = activeSection
               ? !!detail.dirtyBySection[activeSection]
               : false;
-            saveBtn.disabled = !dirty || !activeSection;
-            cancelBtn.disabled = !dirty || !activeSection;
+            saveBtn.disabled = !dirty || !activeSection || hasPendingNewSection;
+            cancelBtn.disabled = !dirty || !activeSection || hasPendingNewSection;
             editor.classList.toggle("is-dirty", dirty);
           }
 
@@ -2250,6 +2437,18 @@
           bodyInner.appendChild(editor);
           bodyInner.appendChild(actionBar);
           syncDirtyState();
+          if (
+            state.pendingAgentEditorFocus &&
+            state.pendingAgentEditorFocus.key === agentKey &&
+            state.pendingAgentEditorFocus.section === activeSection &&
+            !editor.disabled
+          ) {
+            state.pendingAgentEditorFocus = null;
+            window.setTimeout(() => {
+              editor.focus();
+              editor.setSelectionRange(editor.value.length, editor.value.length);
+            }, 0);
+          }
         } else if (isExpanded) {
           const loading = document.createElement("div");
           loading.className = "empty-state";
@@ -2294,6 +2493,7 @@
             return;
           }
           dragState.draggedId = agentKey;
+          dragState.draggedType = "agent";
           card.classList.add("dragging");
           if (event.dataTransfer) {
             event.dataTransfer.effectAllowed = "move";
@@ -2302,6 +2502,7 @@
         });
 
         card.addEventListener("dragover", (event) => {
+          if (dragState.draggedType !== "agent") return;
           if (!dragState.draggedId || dragState.draggedId === agentKey) return;
           event.preventDefault();
           if (event.dataTransfer) event.dataTransfer.dropEffect = "move";
@@ -2318,6 +2519,7 @@
         });
 
         card.addEventListener("drop", (event) => {
+          if (dragState.draggedType !== "agent") return;
           if (!dragState.draggedId || dragState.draggedId === agentKey) return;
           event.preventDefault();
           const rect = card.getBoundingClientRect();
@@ -2328,6 +2530,7 @@
 
         card.addEventListener("dragend", () => {
           dragState.draggedId = null;
+          dragState.draggedType = "";
           card.classList.remove("dragging");
           clearDropMarkers();
         });
@@ -2560,7 +2763,8 @@
         ensureActiveAgentGroupIsValid();
         renderGroups();
         dom.btnAdd.hidden = state.activeMode !== "prompts";
-        dom.btnAddGroup.hidden = state.activeMode !== "prompts";
+        dom.btnAddGroup.hidden = false;
+        dom.btnAddAgent.hidden = state.activeMode !== "agents";
         syncSearchInputFromState();
         updateCountLabel();
         if (state.activeMode === "agents") {
@@ -2743,6 +2947,82 @@
         setStatus(`Changed order of agent "${truncateStatusName(draggedAgent.title)}"`);
       }
 
+      async function moveAgentToGroup(draggedKey, targetGroupId) {
+        const agents = getActiveAgents();
+        const agent = agents.find(
+          (item) =>
+            getAgentKey(
+              item.user,
+              item.group || AGENT_GROUP_UNSORTED_ID,
+              item.agent_slug
+            ) === draggedKey
+        );
+        if (!agent) return;
+        const fromGroup = agent.group || AGENT_GROUP_UNSORTED_ID;
+        if (fromGroup === targetGroupId) {
+          setStatus(`"${truncateStatusName(agent.title)}" is already in ${targetGroupId}`);
+          return;
+        }
+
+        try {
+          const response = await fetch("/agents/move", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              user: agent.user,
+              from_group: fromGroup,
+              to_group: targetGroupId,
+              agent: agent.agent_slug,
+            }),
+          });
+          const parsed = await response.json().catch(() => ({}));
+          if (!response.ok) {
+            const message =
+              parsed && typeof parsed.error === "string"
+                ? parsed.error
+                : "Agent move failed";
+            throw new Error(message);
+          }
+
+          const previousKey = draggedKey;
+          agent.group = targetGroupId;
+          const nextKey = getAgentKey(agent.user, targetGroupId, agent.agent_slug);
+          if (previousKey !== nextKey && state.agentDetailsByKey[previousKey]) {
+            state.agentDetailsByKey[nextKey] = state.agentDetailsByKey[previousKey];
+            delete state.agentDetailsByKey[previousKey];
+          }
+          const expandedKeys = state.expandedAgentKeyByProfile[state.activeProfile] || [];
+          state.expandedAgentKeyByProfile[state.activeProfile] = expandedKeys.map((key) =>
+            key === previousKey ? nextKey : key
+          );
+          if (
+            state.pendingAgentEditorFocus &&
+            state.pendingAgentEditorFocus.key === previousKey
+          ) {
+            state.pendingAgentEditorFocus = {
+              ...state.pendingAgentEditorFocus,
+              key: nextKey,
+            };
+          }
+
+          const groups = getActiveAgentGroups();
+          if (!groups.includes(targetGroupId)) {
+            state.agentGroupsByProfile[state.activeProfile] = normalizeAgentGroups([
+              ...groups,
+              targetGroupId,
+            ]);
+          }
+
+          render();
+          setStatus(
+            `Moved "${truncateStatusName(agent.title)}" to ${targetGroupId}`
+          );
+        } catch (err) {
+          const message = err instanceof Error ? err.message : "Agent move failed";
+          setStatus(message, true);
+        }
+      }
+
       function moveBlockToGroup(draggedId, targetGroupId) {
         const activeBlocks = getActiveBlocks();
         const dragIndex = activeBlocks.findIndex((block) => block.id === draggedId);
@@ -2862,6 +3142,170 @@
 
       function closeDialog() {
         if (dom.contextDialog.open) dom.contextDialog.close();
+      }
+
+      function openAgentCreateDialog() {
+        dom.agentCreateForm.reset();
+        dom.agentCreateDialog.showModal();
+        dom.agentNameInput.focus();
+      }
+
+      function closeAgentCreateDialog() {
+        if (dom.agentCreateDialog.open) dom.agentCreateDialog.close();
+      }
+
+      async function createAgentFromDialog() {
+        const title = dom.agentNameInput.value.trim();
+        if (!title) {
+          setStatus("Agent name is required", true);
+          return;
+        }
+        const agentSlug = slugifyName(title);
+        if (!agentSlug) {
+          setStatus("Agent name must include letters or numbers", true);
+          return;
+        }
+
+        const groupId = resolveCreateAgentGroupId();
+        const userId = state.activeProfile;
+        try {
+          const response = await fetch("/agents/create", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              user: userId,
+              group: groupId,
+              agent: agentSlug,
+              title,
+              description: "",
+              section_order: ["role"],
+            }),
+          });
+          const parsed = await response.json().catch(() => ({}));
+          if (!response.ok) {
+            const message =
+              parsed && typeof parsed.error === "string"
+                ? parsed.error
+                : "Agent create failed";
+            throw new Error(message);
+          }
+
+          const created = normalizeAgentMeta(parsed.agent || {});
+          closeAgentCreateDialog();
+          state.agentSearchByProfile[state.activeProfile] = "";
+          await loadAgentsForProfile(state.activeProfile);
+          if (created) {
+            const knownAgentGroups = getActiveAgentGroups();
+            if (!knownAgentGroups.includes(created.group)) {
+              state.agentGroupsByProfile[state.activeProfile] = normalizeAgentGroups([
+                ...knownAgentGroups,
+                created.group,
+              ]);
+            }
+            const key = getAgentKey(created.user, created.group, created.agent_slug);
+            const expanded = state.expandedAgentKeyByProfile[state.activeProfile] || [];
+            if (!expanded.includes(key)) {
+              state.expandedAgentKeyByProfile[state.activeProfile] = [...expanded, key];
+            }
+            delete state.agentDetailsByKey[key];
+            const detail = await loadAgentDetail(created.user, created.group, created.agent_slug);
+            detail.activeSection = detail.sectionOrder.includes("role")
+              ? "role"
+              : detail.sectionOrder[0] || "";
+            state.pendingAgentEditorFocus = {
+              key,
+              section: detail.activeSection || "",
+            };
+          }
+          syncSearchInputFromState();
+          render();
+          setStatus(`Created agent "${truncateStatusName(title)}"`);
+        } catch (err) {
+          const message = err instanceof Error ? err.message : "Agent create failed";
+          setStatus(message, true);
+        }
+      }
+
+      function cancelPendingNewSection(detail) {
+        if (!detail || !detail.pendingNewSection) return;
+        const fallback = detail.pendingNewSection.previousActiveSection || detail.sectionOrder[0] || "";
+        detail.activeSection = fallback;
+        delete detail.pendingNewSection;
+      }
+
+      async function confirmCreateAgentSection(agentMeta, detail) {
+        if (!detail || !detail.pendingNewSection) return;
+        const rawName = String(detail.pendingNewSection.value || "").trim();
+        if (!rawName) {
+          setStatus("Section name is required", true);
+          return;
+        }
+        const sectionSlug = normalizeSectionKey(rawName);
+        if (!sectionSlug) {
+          setStatus("Section name must include letters or numbers", true);
+          return;
+        }
+        if (detail.sectionOrder.includes(sectionSlug)) {
+          setStatus(`Section "${formatSectionLabel(sectionSlug) || sectionSlug}" already exists`, true);
+          return;
+        }
+
+        try {
+          const response = await fetch("/agents/section/add", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              user: agentMeta.user,
+              group: agentMeta.group || AGENT_GROUP_UNSORTED_ID,
+              agent: agentMeta.agent_slug,
+              section: sectionSlug,
+            }),
+          });
+          const parsed = await response.json().catch(() => ({}));
+          if (!response.ok) {
+            const message =
+              parsed && typeof parsed.error === "string"
+                ? parsed.error
+                : "Section create failed";
+            throw new Error(message);
+          }
+          const addedSection = normalizeSectionKey(parsed.section || sectionSlug) || sectionSlug;
+          if (!detail.sectionOrder.includes(addedSection)) {
+            detail.sectionOrder.push(addedSection);
+          }
+          detail.savedBySection[addedSection] = detail.savedBySection[addedSection] || "";
+          detail.draftBySection[addedSection] = detail.draftBySection[addedSection] || "";
+          detail.dirtyBySection[addedSection] = false;
+          detail.activeSection = addedSection;
+          delete detail.pendingNewSection;
+
+          const key = getAgentKey(
+            agentMeta.user,
+            agentMeta.group || AGENT_GROUP_UNSORTED_ID,
+            agentMeta.agent_slug
+          );
+          state.pendingAgentEditorFocus = { key, section: addedSection };
+
+          const activeAgents = getActiveAgents();
+          const meta = activeAgents.find(
+            (item) =>
+              item.user === agentMeta.user &&
+              (item.group || AGENT_GROUP_UNSORTED_ID) ===
+                (agentMeta.group || AGENT_GROUP_UNSORTED_ID) &&
+              item.agent_slug === agentMeta.agent_slug
+          );
+          if (meta) {
+            meta.section_order = [...detail.sectionOrder];
+          }
+
+          render();
+          setStatus(
+            `Added ${formatSectionLabel(addedSection) || addedSection} section to "${truncateStatusName(agentMeta.title)}"`
+          );
+        } catch (err) {
+          const message = err instanceof Error ? err.message : "Section create failed";
+          setStatus(message, true);
+        }
       }
 
       function askChoiceDialog({
@@ -3039,6 +3483,10 @@
       }
 
       function addGroup() {
+        if (state.activeMode === "agents") {
+          void addAgentGroup();
+          return;
+        }
         const rawName = window.prompt("New group name:");
         if (rawName === null) return;
         const name = rawName.trim();
@@ -3075,6 +3523,69 @@
         void persistWithStatus(`Added group "${truncateStatusName(name)}"`);
       }
 
+      async function addAgentGroup() {
+        const rawName = window.prompt("New agent group name:");
+        if (rawName === null) return;
+        const name = rawName.trim();
+        if (!name) {
+          setStatus("Agent group name is required", true);
+          return;
+        }
+        const groupId = slugifyName(name);
+        if (!groupId) {
+          setStatus("Agent group name must include letters or numbers", true);
+          return;
+        }
+        if (groupId === AGENT_GROUP_UNSORTED_ID) {
+          setActiveAgentGroupId(AGENT_GROUP_UNSORTED_ID);
+          saveActiveAgentGroupsLocal();
+          render();
+          setStatus('Using existing group "Unsorted"');
+          return;
+        }
+
+        const groups = getActiveAgentGroups();
+        if (groups.includes(groupId)) {
+          setActiveAgentGroupId(groupId);
+          saveActiveAgentGroupsLocal();
+          render();
+          setStatus(`Using existing group "${truncateStatusName(groupId)}"`);
+          return;
+        }
+
+        try {
+          const response = await fetch("/agents/groups/create", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              user: state.activeProfile,
+              group: groupId,
+            }),
+          });
+          const parsed = await response.json().catch(() => ({}));
+          if (!response.ok) {
+            const message =
+              parsed && typeof parsed.error === "string"
+                ? parsed.error
+                : "Agent group create failed";
+            throw new Error(message);
+          }
+          const created = slugifyName(parsed.group || groupId) || groupId;
+          state.agentGroupsByProfile[state.activeProfile] = normalizeAgentGroups([
+            ...groups,
+            created,
+          ]);
+          state.activeMode = "agents";
+          setActiveAgentGroupId(created);
+          saveActiveAgentGroupsLocal();
+          render();
+          setStatus(`Added agent group "${truncateStatusName(created)}"`);
+        } catch (err) {
+          const message = err instanceof Error ? err.message : "Agent group create failed";
+          setStatus(message, true);
+        }
+      }
+
       function escapeHtml(value) {
         return String(value)
           .replaceAll("&", "&amp;")
@@ -3085,6 +3596,7 @@
 
       function bindEvents() {
         dom.btnAdd.addEventListener("click", openNewDialog);
+        dom.btnAddAgent.addEventListener("click", openAgentCreateDialog);
         dom.btnAddGroup.addEventListener("click", addGroup);
         dom.userSelect.addEventListener("change", () => {
           switchProfile(dom.userSelect.value);
@@ -3101,6 +3613,11 @@
         dom.contextForm.addEventListener("submit", (event) => {
           event.preventDefault();
           upsertFromDialog();
+        });
+        dom.btnCancelAgentCreate.addEventListener("click", closeAgentCreateDialog);
+        dom.agentCreateForm.addEventListener("submit", (event) => {
+          event.preventDefault();
+          void createAgentFromDialog();
         });
         dom.btnUndoStatus.addEventListener("click", () => {
           void undoLastAction();
@@ -3136,6 +3653,13 @@
             state.groups[user.id] = ensureDefaultGroup([]);
           }
           setStatus("Could not load from server", true);
+        }
+        for (const user of state.configuredUsers) {
+          try {
+            await loadAgentGroupsForProfile(user.id);
+          } catch (_err) {
+            state.agentGroupsByProfile[user.id] = [AGENT_GROUP_UNSORTED_ID];
+          }
         }
         for (const user of state.configuredUsers) {
           try {

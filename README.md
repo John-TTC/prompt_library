@@ -17,6 +17,7 @@ The project is currently a hybrid local app with:
 - Stage 3: Backend agent filesystem service + Flask routes (done)
 - Stage 4: First visible agent UI layer (done)
 - Stage 5: Agent construct behavior (done)
+- Stage 5.1: Agent creation + section add flow + agent groups (done)
 
 ### Prompt features currently available
 
@@ -34,12 +35,17 @@ The project is currently a hybrid local app with:
 
 - Agent navigation/filter presence in left nav
 - Agent list rendering by active user/group
+- Agent group creation in Agent mode (`+ Group`)
+- Agent groups persisted separately from prompt groups (including empty groups)
+- Agent drag/drop assignment to Agent groups in sidebar
 - Expand/collapse agent cards
 - Multiple agent cards can remain expanded at once
 - Agent card reorder (collapsed and expanded)
+- Add Agent dialog with disk-backed creation in selected group (or `Unsorted` from `All Agents`)
 - Load existing agent sections from backend
 - Section tab switching
 - Edit/save/cancel existing section content
+- Add new section via `+` tab with Enter/Escape name flow and uniqueness checks
 - Dirty-edit discard confirmations on key navigation paths
 - Agent delete with confirmation
 - Construct Agent Prompt + Construct Section Prompt
@@ -53,7 +59,7 @@ The project is currently a hybrid local app with:
 
 - Agent zip export (Stage 6)
 - Character/token counts (Stage 7)
-- Agent creation UX and section create/rename/order editing
+- Agent section rename/reorder/deletion UX
 
 ## Architecture Notes
 
@@ -68,6 +74,9 @@ agents/<user>/<group>/<agent>/
   rules.md
   process.md
   output.md
+
+agents/<user>/agent-groups.json
+  # persisted list of Agent groups (includes empty groups)
 ```
 
 Section keys are canonically handled as lowercase names (e.g. `role`, `rules`) with compatibility for legacy values like `role.md`.
