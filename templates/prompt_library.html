@@ -322,6 +322,40 @@
       border-color: transparent;
     }
 
+    .card-context-menu {
+      position: fixed;
+      z-index: 1000;
+      background: #0b1220;
+      border: 1px solid #334155;
+      border-radius: 8px;
+      min-width: 150px;
+      padding: 4px;
+      box-shadow: 0 8px 24px rgba(2, 6, 23, 0.6);
+    }
+
+    .card-context-menu button {
+      width: 100%;
+      text-align: left;
+      border: 1px solid transparent;
+      background: transparent;
+      color: #e2e8f0;
+      border-radius: 6px;
+      padding: 6px 8px;
+      font-size: 12px;
+    }
+
+    .card-context-menu button:hover {
+      background: #1f2937;
+      border-color: #334155;
+    }
+
+    .inline-edit-active {
+      outline: 1px solid #60a5fa;
+      border-radius: 6px;
+      background: rgba(30, 58, 138, 0.12);
+      cursor: text;
+    }
+
     .agent-tabs {
       display: flex;
       gap: 6px;
@@ -808,6 +842,11 @@
     <button id="groupContextDeleteBtn" type="button">Delete</button>
   </div>
 
+  <div id="cardContextMenu" class="card-context-menu" hidden>
+    <button id="cardContextEditNameBtn" type="button">Edit Name</button>
+    <button id="cardContextEditDescriptionBtn" type="button">Edit Description</button>
+  </div>
+
   <script>
     (() => {
       "use strict";
@@ -849,6 +888,9 @@
         btnCancelAgentCreate: document.getElementById("btnCancelAgentCreate"),
         groupContextMenu: document.getElementById("groupContextMenu"),
         groupContextDeleteBtn: document.getElementById("groupContextDeleteBtn"),
+        cardContextMenu: document.getElementById("cardContextMenu"),
+        cardContextEditNameBtn: document.getElementById("cardContextEditNameBtn"),
+        cardContextEditDescriptionBtn: document.getElementById("cardContextEditDescriptionBtn"),
       };
 
       const DEFAULT_GROUP_ID = "group-unsorted";
@@ -874,6 +916,7 @@
         promptUiByProfile: {},
         pendingAgentEditorFocus: null,
         contextMenuTarget: null,
+        cardContextTarget: null,
         undoSnapshot: null,
         undoStatusMessage: "",
       };
@@ -1004,6 +1047,14 @@
         const sectionOrder = Array.isArray(entry.section_order)
           ? entry.section_order.filter((s) => typeof s === "string" && s.trim())
           : [];
+        const charCount =
+          typeof entry.char_count === "number" && Number.isFinite(entry.char_count)
+            ? Math.max(0, Math.round(entry.char_count))
+            : 0;
+        const tokenEstimate =
+          typeof entry.token_estimate === "number" && Number.isFinite(entry.token_estimate)
+            ? Math.max(0, Math.round(entry.token_estimate))
+            : Math.round(charCount / 4);
         return {
           id: typeof entry.id === "string" && entry.id.trim() ? entry.id : agentSlug,
           title,
@@ -1012,6 +1063,8 @@
           group,
           agent_slug: agentSlug,
           section_order: sectionOrder,
+          char_count: charCount,
+          token_estimate: tokenEstimate,
         };
       }
 
@@ -1028,6 +1081,14 @@
           .toLowerCase()
           .replace(/[^a-z0-9]+/g, "-")
           .replace(/^-+|-+$/g, "");
+      }
+
+      function countChars(value) {
+        return String(value || "").length;
+      }
+
+      function estimateTokensFromChars(charCount) {
+        return Math.max(0, Math.round((Number(charCount) || 0) / 4));
       }
 
       function resolveCreateAgentGroupId() {
@@ -1728,7 +1789,7 @@
       }
 
       function renderGroups() {
-        closeGroupContextMenu();
+        closeAllContextMenus();
         dom.groupsContainer.innerHTML = "";
         const promptSectionTitle = document.createElement("div");
         promptSectionTitle.className = "nav-section-title";
@@ -1917,6 +1978,7 @@
       }
 
       function openGroupContextMenu(x, y, target) {
+        closeCardContextMenu();
         state.contextMenuTarget = target;
         const menu = dom.groupContextMenu;
         dom.groupContextDeleteBtn.disabled = !target.deletable;
@@ -1933,6 +1995,85 @@
       function closeGroupContextMenu() {
         state.contextMenuTarget = null;
         dom.groupContextMenu.hidden = true;
+      }
+
+      function openCardContextMenu(x, y, target) {
+        closeGroupContextMenu();
+        state.cardContextTarget = target;
+        const menu = dom.cardContextMenu;
+        menu.hidden = false;
+        const viewportWidth = window.innerWidth;
+        const viewportHeight = window.innerHeight;
+        const rect = menu.getBoundingClientRect();
+        const left = Math.min(Math.max(8, x), viewportWidth - rect.width - 8);
+        const top = Math.min(Math.max(8, y), viewportHeight - rect.height - 8);
+        menu.style.left = `${left}px`;
+        menu.style.top = `${top}px`;
+      }
+
+      function closeCardContextMenu() {
+        state.cardContextTarget = null;
+        dom.cardContextMenu.hidden = true;
+      }
+
+      function closeAllContextMenus() {
+        closeGroupContextMenu();
+        closeCardContextMenu();
+      }
+
+      function focusEditableElementText(element) {
+        const selection = window.getSelection();
+        if (!selection) return;
+        const range = document.createRange();
+        range.selectNodeContents(element);
+        range.collapse(false);
+        selection.removeAllRanges();
+        selection.addRange(range);
+      }
+
+      function startInlineTextEdit(element, initialValue, onCommit) {
+        if (!(element instanceof HTMLElement)) return;
+        const previousText = String(initialValue ?? "");
+        element.contentEditable = "true";
+        element.classList.add("inline-edit-active");
+        element.spellcheck = false;
+        element.focus();
+        focusEditableElementText(element);
+
+        let finished = false;
+        const cleanup = () => {
+          element.contentEditable = "false";
+          element.classList.remove("inline-edit-active");
+          element.removeEventListener("keydown", onKeyDown);
+          element.removeEventListener("blur", onBlur);
+        };
+        const finish = async (save) => {
+          if (finished) return;
+          finished = true;
+          const nextText = (element.textContent || "").trim();
+          cleanup();
+          if (!save) {
+            element.textContent = previousText;
+            return;
+          }
+          await onCommit(nextText, previousText);
+        };
+        const onKeyDown = (event) => {
+          if (event.key === "Escape") {
+            event.preventDefault();
+            void finish(false);
+            return;
+          }
+          if (event.key === "Enter") {
+            event.preventDefault();
+            void finish(true);
+          }
+        };
+        const onBlur = () => {
+          void finish(true);
+        };
+        element.addEventListener("keydown", onKeyDown);
+        element.addEventListener("blur", onBlur);
       }
 
       function wireGroupDropTarget(element, groupId) {
@@ -1985,6 +2126,7 @@
         const card = document.createElement("article");
         card.className = "block-card";
         card.dataset.id = block.id;
+        card.dataset.hasCardContext = "true";
         card.draggable = true;
 
         const header = document.createElement("div");
@@ -2004,7 +2146,6 @@
         meta.className = "block-meta";
         const badge = document.createElement("span");
         badge.className = "group-badge";
-        badge.textContent = getGroupLabel(block.groupId);
         meta.appendChild(badge);
 
         titleWrap.appendChild(title);
@@ -2110,6 +2251,12 @@
           persistPromptUiState();
         }
 
+        function updatePromptHeaderMeta() {
+          const chars = countChars(block.contextText);
+          const tokens = estimateTokensFromChars(chars);
+          badge.textContent = `Group: ${getGroupLabel(block.groupId)} | ${chars} chars | ~${tokens} tokens`;
+        }
+
         function refreshDirtyFlag() {
           isPromptDirty = promptEditor.value !== savedPromptText;
           updateInlinePromptState();
@@ -2133,6 +2280,7 @@
           block.contextText = promptEditor.value;
           savedPromptText = promptEditor.value;
           isPromptDirty = false;
+          updatePromptHeaderMeta();
           updateInlinePromptState();
           setUndoSnapshot(
             previousBlocks,
@@ -2203,6 +2351,66 @@
           }
         }
 
+        async function persistPromptCardField(fieldName, nextValueRaw, previousValue) {
+          const nextValue = String(nextValueRaw || "").trim();
+          if (!nextValue) {
+            setStatus(`${fieldName === "name" ? "Prompt name" : "Prompt description"} is required`, true);
+            if (fieldName === "name") title.textContent = previousValue;
+            else description.textContent = previousValue;
+            return;
+          }
+          if (nextValue === previousValue) {
+            if (fieldName === "name") title.textContent = previousValue;
+            else description.textContent = previousValue;
+            return;
+          }
+
+          const activeBlocks = getActiveBlocks();
+          const idx = activeBlocks.findIndex((item) => item.id === block.id);
+          if (idx < 0) return;
+          const previousBlocks = cloneBlocks(activeBlocks);
+          const updated = {
+            ...activeBlocks[idx],
+            [fieldName]: nextValue,
+            updatedAt: nowIso(),
+          };
+          activeBlocks[idx] = updated;
+          setActiveBlocks(activeBlocks);
+          if (fieldName === "name") {
+            block.name = nextValue;
+            title.textContent = nextValue;
+          } else {
+            block.description = nextValue;
+            description.textContent = nextValue;
+          }
+          render();
+          try {
+            await saveToServer();
+            setStatus(
+              `Updated ${fieldName === "name" ? "name" : "description"} for "${truncateStatusName(block.name)}"`
+            );
+          } catch (_err) {
+            setActiveBlocks(previousBlocks);
+            const restored = previousBlocks[idx] || block;
+            block.name = restored.name || block.name;
+            block.description = restored.description || block.description;
+            setStatus("Autosave failed: Server may not be running", true);
+            render();
+          }
+        }
+
+        function beginPromptCardFieldEdit(fieldName) {
+          if (fieldName === "name") {
+            startInlineTextEdit(title, block.name || "", async (nextValue, previousValue) => {
+              await persistPromptCardField("name", nextValue, previousValue);
+            });
+            return;
+          }
+          startInlineTextEdit(description, block.description || "", async (nextValue, previousValue) => {
+            await persistPromptCardField("description", nextValue, previousValue);
+          });
+        }
+
         function syncCardDraggable() {
           card.draggable = true;
         }
@@ -2235,7 +2443,22 @@
           if (target.closest("button")) return;
           if (target.closest(".row-actions")) return;
           if (target.closest(".context-body")) return;
+          if (target.closest('[contenteditable="true"]')) return;
           void setExpanded(!body.classList.contains("open"));
+        });
+
+        card.addEventListener("contextmenu", (event) => {
+          if (!(event.target instanceof Element)) return;
+          if (event.target.closest("button")) return;
+          if (event.target.closest("textarea")) return;
+          if (event.target.closest("input")) return;
+          event.preventDefault();
+          event.stopPropagation();
+          openCardContextMenu(event.clientX, event.clientY, {
+            type: "prompt-card",
+            editName: () => beginPromptCardFieldEdit("name"),
+            editDescription: () => beginPromptCardFieldEdit("description"),
+          });
         });
 
         quickCopyBtn.addEventListener("click", (event) =>
@@ -2252,6 +2475,7 @@
           void confirmDiscardPromptChanges();
         });
         promptEditor.addEventListener("input", refreshDirtyFlag);
+        updatePromptHeaderMeta();
 
         deleteBtn.addEventListener("click", () => deleteBlock(block.id));
 
@@ -2261,7 +2485,8 @@
             (event.target.closest("button") ||
               event.target.closest("textarea") ||
               event.target.closest("input") ||
-              event.target.closest("select"))
+              event.target.closest("select") ||
+              event.target.closest('[contenteditable="true"]'))
           ) {
             event.preventDefault();
             return;
@@ -2329,10 +2554,22 @@
         const sectionCount = Array.isArray(agentMeta.section_order)
           ? agentMeta.section_order.length
           : 0;
+        function computeSavedAgentChars(detailData) {
+          if (!detailData || !detailData.savedBySection) return 0;
+          const names = Array.isArray(detailData.sectionOrder)
+            ? detailData.sectionOrder
+            : [];
+          let total = 0;
+          for (const sectionName of names) {
+            total += countChars(detailData.savedBySection[sectionName] || "");
+          }
+          return total;
+        }
 
         const card = document.createElement("article");
         card.className = "block-card";
         card.dataset.agentKey = agentKey;
+        card.dataset.hasCardContext = "true";
         card.draggable = true;
 
         const header = document.createElement("div");
@@ -2352,7 +2589,19 @@
         meta.className = "block-meta";
         const metaBadge = document.createElement("span");
         metaBadge.className = "group-badge";
-        metaBadge.textContent = `Sections: ${sectionCount}`;
+        function updateAgentHeaderMeta(totalCharsOverride = null) {
+          const totalChars =
+            typeof totalCharsOverride === "number"
+              ? totalCharsOverride
+              : detail
+                ? computeSavedAgentChars(detail)
+                : Number(agentMeta.char_count) || 0;
+          const tokens = estimateTokensFromChars(totalChars);
+          metaBadge.textContent = `Sections: ${sectionCount} | ${totalChars} chars | ~${tokens} tokens`;
+          agentMeta.char_count = totalChars;
+          agentMeta.token_estimate = tokens;
+        }
+        updateAgentHeaderMeta();
         meta.appendChild(metaBadge);
 
         titleWrap.appendChild(title);
@@ -2474,11 +2723,23 @@
 
           const sectionMeta = document.createElement("div");
           sectionMeta.className = "agent-section-meta";
-          sectionMeta.textContent = hasPendingNewSection
-            ? "Name the new section, then press Enter"
-            : activeSection
-            ? `${formatSectionLabel(activeSection) || activeSection} section`
-            : "No sections";
+          function updateSectionMetaAndTotals() {
+            if (hasPendingNewSection) {
+              sectionMeta.textContent = "Name the new section, then press Enter";
+              return;
+            }
+            if (!activeSection) {
+              sectionMeta.textContent = "No sections";
+              updateAgentHeaderMeta();
+              return;
+            }
+            const chars = countChars(detail.savedBySection[activeSection] || "");
+            const tokens = estimateTokensFromChars(chars);
+            sectionMeta.textContent =
+              `${formatSectionLabel(activeSection) || activeSection} section | ${chars} chars | ~${tokens} tokens`;
+            updateAgentHeaderMeta(computeSavedAgentChars(detail));
+          }
+          updateSectionMetaAndTotals();
 
           const editor = document.createElement("textarea");
           editor.className = "agent-editor";
@@ -2543,6 +2804,7 @@
               if (!response.ok) throw new Error("Save failed");
               detail.savedBySection[activeSection] = detail.draftBySection[activeSection] || "";
               detail.dirtyBySection[activeSection] = false;
+              updateSectionMetaAndTotals();
               syncDirtyState();
               setStatus(`Saved ${agentMeta.title} ${activeSection} section`);
             } catch (_err) {
@@ -2620,7 +2882,95 @@
           if (target.closest("input")) return;
           if (target.closest("select")) return;
           if (target.closest(".context-body")) return;
+          if (target.closest('[contenteditable="true"]')) return;
           void toggleAgentExpanded(agentMeta);
+        });
+
+        async function persistAgentCardField(fieldName, nextValueRaw, previousValue) {
+          const nextValue = String(nextValueRaw || "").trim();
+          if (fieldName === "title" && !nextValue) {
+            setStatus("Agent name is required", true);
+            title.textContent = previousValue;
+            return;
+          }
+          if (nextValue === previousValue) {
+            if (fieldName === "title") title.textContent = previousValue;
+            else description.textContent = previousValue;
+            return;
+          }
+          try {
+            const response = await fetch("/agents/meta/save", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                user: agentMeta.user,
+                group: agentMeta.group || AGENT_GROUP_UNSORTED_ID,
+                agent: agentMeta.agent_slug,
+                title: fieldName === "title" ? nextValue : agentMeta.title,
+                description:
+                  fieldName === "description" ? nextValue : agentMeta.description || "",
+              }),
+            });
+            const parsed = await response.json().catch(() => ({}));
+            if (!response.ok) {
+              const message =
+                parsed && typeof parsed.error === "string"
+                  ? parsed.error
+                  : "Agent metadata save failed";
+              throw new Error(message);
+            }
+            if (fieldName === "title") {
+              agentMeta.title = nextValue;
+              title.textContent = nextValue;
+            } else {
+              agentMeta.description = nextValue;
+              description.textContent = nextValue || "No description";
+            }
+            render();
+            setStatus(
+              `Updated ${fieldName === "title" ? "name" : "description"} for "${truncateStatusName(agentMeta.title)}"`
+            );
+          } catch (err) {
+            if (fieldName === "title") {
+              title.textContent = previousValue;
+            } else {
+              description.textContent = previousValue || "No description";
+            }
+            const message =
+              err instanceof Error ? err.message : "Agent metadata save failed";
+            setStatus(message, true);
+          }
+        }
+
+        function beginAgentCardFieldEdit(fieldName) {
+          if (fieldName === "title") {
+            startInlineTextEdit(title, agentMeta.title || "", async (nextValue, previousValue) => {
+              await persistAgentCardField("title", nextValue, previousValue);
+            });
+            return;
+          }
+          startInlineTextEdit(
+            description,
+            agentMeta.description || "",
+            async (nextValue, previousValue) => {
+              await persistAgentCardField("description", nextValue, previousValue);
+            }
+          );
+        }
+
+        card.addEventListener("contextmenu", (event) => {
+          if (!(event.target instanceof Element)) return;
+          if (event.target.closest("button")) return;
+          if (event.target.closest("textarea")) return;
+          if (event.target.closest("input")) return;
+          if (event.target.closest("select")) return;
+          event.preventDefault();
+          event.stopPropagation();
+          openCardContextMenu(event.clientX, event.clientY, {
+            type: "agent-card",
+            editName: () => beginAgentCardFieldEdit("title"),
+            editDescription: () => beginAgentCardFieldEdit("description"),
+          });
         });
 
         card.addEventListener("dragstart", (event) => {
@@ -2629,7 +2979,8 @@
             (event.target.closest("button") ||
               event.target.closest("textarea") ||
               event.target.closest("input") ||
-              event.target.closest("select"))
+              event.target.closest("select") ||
+              event.target.closest('[contenteditable="true"]'))
           ) {
             event.preventDefault();
             return;
@@ -3856,6 +4207,19 @@
         }
       }
 
+      function handleCardContextAction(actionName) {
+        const target = state.cardContextTarget;
+        closeCardContextMenu();
+        if (!target) return;
+        if (actionName === "name" && typeof target.editName === "function") {
+          target.editName();
+          return;
+        }
+        if (actionName === "description" && typeof target.editDescription === "function") {
+          target.editDescription();
+        }
+      }
+
       function escapeHtml(value) {
         return String(value)
           .replaceAll("&", "&amp;")
@@ -3895,26 +4259,35 @@
         dom.groupContextDeleteBtn.addEventListener("click", () => {
           void handleGroupContextDelete();
         });
+        dom.cardContextEditNameBtn.addEventListener("click", () => {
+          handleCardContextAction("name");
+        });
+        dom.cardContextEditDescriptionBtn.addEventListener("click", () => {
+          handleCardContextAction("description");
+        });
         document.addEventListener("click", (event) => {
           if (!(event.target instanceof Element)) {
-            closeGroupContextMenu();
+            closeAllContextMenus();
             return;
           }
-          if (!dom.groupContextMenu.contains(event.target)) {
-            closeGroupContextMenu();
-          }
+          if (!dom.groupContextMenu.contains(event.target)) closeGroupContextMenu();
+          if (!dom.cardContextMenu.contains(event.target)) closeCardContextMenu();
         });
         document.addEventListener("contextmenu", (event) => {
           if (!(event.target instanceof Element)) {
-            closeGroupContextMenu();
+            closeAllContextMenus();
             return;
           }
           if (!event.target.closest('.group-item[data-has-context-menu="true"]')) {
             closeGroupContextMenu();
           }
+          if (!event.target.closest('.block-card[data-has-card-context="true"]')) {
+            closeCardContextMenu();
+          }
         });
-        window.addEventListener("resize", closeGroupContextMenu);
-        dom.groupsContainer.addEventListener("scroll", closeGroupContextMenu);
+        window.addEventListener("resize", closeAllContextMenus);
+        dom.groupsContainer.addEventListener("scroll", closeAllContextMenus);
+        dom.blocksContainer.addEventListener("scroll", closeAllContextMenus);
       }
 
       async function init() {

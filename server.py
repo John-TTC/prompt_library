@@ -269,6 +269,33 @@ def save_agent_section():
     return jsonify(result)
 
 
+@app.route("/agents/meta/save", methods=["POST"])
+def save_agent_meta():
+    payload = request.get_json(force=True) or {}
+    user = str(payload.get("user", "")).strip()
+    group = str(payload.get("group", "")).strip()
+    agent_slug = str(payload.get("agent", "")).strip()
+    if not user or not group or not agent_slug:
+        return jsonify({"error": "Missing user/group/agent"}), 400
+
+    title = payload.get("title")
+    description = payload.get("description")
+    try:
+        result = agent_service.save_agent_meta(
+            AGENTS_ROOT,
+            user=user,
+            group=group,
+            agent_slug=agent_slug,
+            title=title,
+            description=description,
+        )
+    except ValueError as err:
+        return jsonify({"error": str(err)}), 400
+    except FileNotFoundError as err:
+        return jsonify({"error": str(err)}), 404
+    return jsonify(result)
+
+
 @app.route("/agents/section/add", methods=["POST"])
 def add_agent_section():
     payload = request.get_json(force=True) or {}

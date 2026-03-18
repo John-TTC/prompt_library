@@ -282,6 +282,10 @@ def _write_text(path, content):
         f.write(content)
 
 
+def _estimate_tokens(char_count):
+    return int(round(max(0, int(char_count)) / 4))
+
+
 def list_agents(agents_root, user):
     root = Path(agents_root)
     user_root, user_norm = _user_root(root, user)
@@ -316,6 +320,17 @@ def list_agents(agents_root, user):
                     section_order.append(normalized)
             if not section_order:
                 section_order = list(DEFAULT_SECTION_ORDER)
+            total_chars = 0
+            for section_name in section_order:
+                file_name, _ = _section_file_name(section_name)
+                section_path = agent_dir / file_name
+                if section_path.exists():
+                    total_chars += len(_read_text(section_path))
+                    continue
+                legacy_file_name, _ = _legacy_section_file_name(section_name)
+                legacy_path = agent_dir / legacy_file_name
+                if legacy_path.exists():
+                    total_chars += len(_read_text(legacy_path))
             items.append(
                 {
                     "id": payload.get("id", _normalize_segment(agent_dir.name, "agent")),
@@ -325,6 +340,8 @@ def list_agents(agents_root, user):
                     "group": group_norm,
                     "agent_slug": _normalize_segment(agent_dir.name, "agent"),
                     "section_order": section_order,
+                    "char_count": total_chars,
+                    "token_estimate": _estimate_tokens(total_chars),
                 }
             )
 
@@ -461,6 +478,31 @@ def save_section(agents_root, user, group, agent_slug, section_name, content):
     return {"ok": True, "section": section_norm}
 
 
+def save_agent_meta(agents_root, user, group, agent_slug, title=None, description=None):
+    root = Path(agents_root)
+    agent_dir, _, _, agent_norm = _agent_dir(root, user, group, agent_slug)
+    agent_json = _agent_json_path(agent_dir)
+    if not agent_json.exists():
+        raise FileNotFoundError("Agent not found")
+
+    payload = _read_json(agent_json)
+    if title is not None:
+        title_value = str(title).strip()
+        if not title_value:
+            raise ValueError("Agent title is required")
+        payload["title"] = title_value
+    if description is not None:
+        payload["description"] = str(description)
+    _write_json(agent_json, payload)
+
+    return {
+        "ok": True,
+        "id": payload.get("id", agent_norm),
+        "title": payload.get("title", agent_norm),
+        "description": payload.get("description", ""),
+    }
+
+
 def add_section(agents_root, user, group, agent_slug, section_name):
     root = Path(agents_root)
     agent_dir, _, _, _ = _agent_dir(root, user, group, agent_slug)
@@ -556,6 +598,8 @@ def create_agent(
         "group": payload["group"],
         "agent_slug": agent_norm,
         "section_order": section_order_norm,
+        "char_count": 0,
+        "token_estimate": 0,
     }
 
 

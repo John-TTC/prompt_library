@@ -20,10 +20,11 @@ The project is currently a hybrid local app with:
 - Stage 5.1: Agent creation + section add flow + agent groups (done)
 - Stage 5.2: Prompt/Agent group parity (create, reorder, context-menu delete) (done)
 - Stage 5.3: No Group model + scroll/resize polish (done)
+- Stage 7: Saved-state character/token counts (done)
 
 ### Prompt features currently available
 
-- Prompt groups (including `All` and `Unsorted`) per user
+- Prompt groups per user with `No Group` pinned first
 - Prompt groups use `No Group` as the built-in default (pinned first)
 - Prompt groups are filtered by selected real group (no synthetic `All Prompts` row)
 - Prompt group creation from `+ Group`
@@ -32,6 +33,7 @@ The project is currently a hybrid local app with:
 - Search/filter by prompt group
 - Expand/collapse prompt cards
 - Inline prompt text editing in expanded cards
+- Prompt card right-click menu for inline name/description edits (save on Enter or blur)
 - Prompt card quick action text updated to `Copy to Clipboard`
 - Dirty-state save/cancel/copy confirmation behavior
 - Prompt delete
@@ -53,11 +55,12 @@ The project is currently a hybrid local app with:
 - Expand/collapse agent cards
 - Multiple agent cards can remain expanded at once
 - Agent card reorder (collapsed and expanded)
-- Add Agent dialog with disk-backed creation in selected group (or `Unsorted` from `All Agents`)
+- Add Agent dialog with disk-backed creation in selected group (`No Group` fallback)
 - Load existing agent sections from backend
 - Section tab switching
 - Edit/save/cancel existing section content
 - Add new section via `+` tab with Enter/Escape name flow and uniqueness checks
+- Agent card right-click menu for inline name/description edits (save on Enter or blur)
 - Dirty-edit discard confirmations on key navigation paths
 - Agent delete with confirmation
 - Construct Agent Prompt + Construct Section Prompt
@@ -70,7 +73,6 @@ The project is currently a hybrid local app with:
 ### Agent features intentionally deferred
 
 - Agent zip export (Stage 6)
-- Character/token counts (Stage 7)
 - Agent section rename/reorder/deletion UX
 - Agent group rename UX
 
