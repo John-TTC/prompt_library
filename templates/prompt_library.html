@@ -721,6 +721,19 @@
     </form>
   </dialog>
 
+  <dialog id="constructDialog">
+    <form method="dialog" class="dialog-content">
+      <h2 class="dialog-title">Constructed Prompt</h2>
+      <pre id="constructPreviewText" class="context-text"></pre>
+      <p id="constructCopiedMessage" class="agent-section-meta" hidden>Copied to Clipboard</p>
+      <div class="dialog-actions">
+        <button type="button" id="btnConstructCancel">Cancel</button>
+        <button type="button" id="btnConstructCopy" class="btn-primary">Copy to Clipboard</button>
+        <button type="button" id="btnConstructOk" class="btn-primary" hidden>OK</button>
+      </div>
+    </form>
+  </dialog>
+
   <script>
     (() => {
       "use strict";
@@ -749,6 +762,12 @@
         choiceBtnPrimary: document.getElementById("choiceBtnPrimary"),
         choiceBtnSecondary: document.getElementById("choiceBtnSecondary"),
         choiceBtnTertiary: document.getElementById("choiceBtnTertiary"),
+        constructDialog: document.getElementById("constructDialog"),
+        constructPreviewText: document.getElementById("constructPreviewText"),
+        constructCopiedMessage: document.getElementById("constructCopiedMessage"),
+        btnConstructCancel: document.getElementById("btnConstructCancel"),
+        btnConstructCopy: document.getElementById("btnConstructCopy"),
+        btnConstructOk: document.getElementById("btnConstructOk"),
       };
 
       const GROUP_ALL_ID = "__all__";
@@ -772,6 +791,7 @@
         expandedAgentKeyByProfile: {},
         searchByProfile: {},
         agentSearchByProfile: {},
+        promptUiByProfile: {},
         editingId: null,
         undoSnapshot: null,
         undoStatusMessage: "",
@@ -795,14 +815,17 @@
         if (!state.activeAgentGroupByProfile[profileId]) {
           state.activeAgentGroupByProfile[profileId] = AGENT_GROUP_ALL_ID;
         }
-        if (typeof state.expandedAgentKeyByProfile[profileId] !== "string") {
-          state.expandedAgentKeyByProfile[profileId] = "";
+        if (!Array.isArray(state.expandedAgentKeyByProfile[profileId])) {
+          state.expandedAgentKeyByProfile[profileId] = [];
         }
         if (typeof state.searchByProfile[profileId] !== "string") {
           state.searchByProfile[profileId] = "";
         }
         if (typeof state.agentSearchByProfile[profileId] !== "string") {
           state.agentSearchByProfile[profileId] = "";
+        }
+        if (!state.promptUiByProfile[profileId] || typeof state.promptUiByProfile[profileId] !== "object") {
+          state.promptUiByProfile[profileId] = {};
         }
       }
 
@@ -1074,6 +1097,13 @@
           return state.agentSearchByProfile[state.activeProfile] || "";
         }
         return state.searchByProfile[state.activeProfile] || "";
+      }
+
+      function getPromptUiMap() {
+        if (!state.promptUiByProfile[state.activeProfile]) {
+          state.promptUiByProfile[state.activeProfile] = {};
+        }
+        return state.promptUiByProfile[state.activeProfile];
       }
 
       function getActiveProfileLabel() {
@@ -1784,13 +1814,29 @@
         body.appendChild(collapseHitarea);
         body.appendChild(bodyInner);
 
+        const promptUiMap = getPromptUiMap();
+        const existingUi = promptUiMap[block.id] || null;
         let savedPromptText = block.contextText;
         let isPromptDirty = false;
+        let isExpandedState = !!(existingUi && existingUi.isExpanded);
+        if (existingUi && typeof existingUi.draftText === "string") {
+          promptEditor.value = existingUi.draftText;
+          isPromptDirty = promptEditor.value !== savedPromptText;
+        }
+
+        function persistPromptUiState() {
+          promptUiMap[block.id] = {
+            isExpanded: isExpandedState,
+            isDirty: isPromptDirty,
+            draftText: promptEditor.value,
+          };
+        }
 
         function updateInlinePromptState() {
           savePromptBtn.disabled = !isPromptDirty;
           cancelPromptBtn.disabled = !isPromptDirty;
           promptEditor.classList.toggle("is-dirty", isPromptDirty);
+          persistPromptUiState();
         }
 
         function refreshDirtyFlag() {
@@ -1887,7 +1933,15 @@
         }
 
         function syncCardDraggable() {
-          card.draggable = !body.classList.contains("open");
+          card.draggable = true;
+        }
+
+        function applyExpandedVisual(isOpen) {
+          body.classList.toggle("open", isOpen);
+          arrowBtn.setAttribute("aria-expanded", String(isOpen));
+          arrowBtn.innerHTML = isOpen ? "&#9652;" : "&#9662;";
+          isExpandedState = isOpen;
+          persistPromptUiState();
         }
 
         async function setExpanded(isOpen) {
@@ -1895,9 +1949,7 @@
             const okToClose = await confirmDiscardPromptChanges();
             if (!okToClose) return;
           }
-          body.classList.toggle("open", isOpen);
-          arrowBtn.setAttribute("aria-expanded", String(isOpen));
-          arrowBtn.innerHTML = isOpen ? "&#9652;" : "&#9662;";
+          applyExpandedVisual(isOpen);
           syncCardDraggable();
         }
 
@@ -1934,10 +1986,6 @@
         deleteBtn.addEventListener("click", () => deleteBlock(block.id));
 
         card.addEventListener("dragstart", (event) => {
-          if (body.classList.contains("open")) {
-            event.preventDefault();
-            return;
-          }
           if (
             event.target &&
             (event.target.closest("button") ||
@@ -1989,7 +2037,9 @@
 
         card.appendChild(header);
         card.appendChild(body);
+        applyExpandedVisual(isExpandedState);
         syncCardDraggable();
+        updateInlinePromptState();
         return card;
       }
 
@@ -1999,8 +2049,8 @@
           agentMeta.group || AGENT_GROUP_UNSORTED_ID,
           agentMeta.agent_slug
         );
-        const expandedKey = state.expandedAgentKeyByProfile[state.activeProfile] || "";
-        const isExpanded = expandedKey === agentKey;
+        const expandedKeys = state.expandedAgentKeyByProfile[state.activeProfile] || [];
+        const isExpanded = expandedKeys.includes(agentKey);
         const detail = state.agentDetailsByKey[agentKey] || null;
         const sectionCount = Array.isArray(agentMeta.section_order)
           ? agentMeta.section_order.length
@@ -2009,7 +2059,7 @@
         const card = document.createElement("article");
         card.className = "block-card";
         card.dataset.agentKey = agentKey;
-        card.draggable = false;
+        card.draggable = true;
 
         const header = document.createElement("div");
         header.className = "block-header";
@@ -2048,8 +2098,7 @@
         const constructAgentBtn = document.createElement("button");
         constructAgentBtn.type = "button";
         constructAgentBtn.textContent = "Construct Agent Prompt";
-        constructAgentBtn.disabled = true;
-        constructAgentBtn.title = "Available in Stage 5";
+        constructAgentBtn.disabled = false;
 
         const deleteBtn = document.createElement("button");
         deleteBtn.type = "button";
@@ -2120,14 +2169,12 @@
           const constructSectionBtn = document.createElement("button");
           constructSectionBtn.type = "button";
           constructSectionBtn.textContent = "Construct Section Prompt";
-          constructSectionBtn.disabled = true;
-          constructSectionBtn.title = "Available in Stage 5";
+          constructSectionBtn.disabled = !activeSection;
 
           const constructFullBtn = document.createElement("button");
           constructFullBtn.type = "button";
           constructFullBtn.textContent = "Construct Agent Prompt";
-          constructFullBtn.disabled = true;
-          constructFullBtn.title = "Available in Stage 5";
+          constructFullBtn.disabled = false;
 
           const cancelBtn = document.createElement("button");
           cancelBtn.type = "button";
@@ -2187,6 +2234,13 @@
             })();
           });
 
+          constructFullBtn.addEventListener("click", () => {
+            void handleConstructAction(agentMeta, false);
+          });
+          constructSectionBtn.addEventListener("click", () => {
+            void handleConstructAction(agentMeta, true);
+          });
+
           actionBar.appendChild(saveBtn);
           actionBar.appendChild(constructFullBtn);
           actionBar.appendChild(constructSectionBtn);
@@ -2205,6 +2259,9 @@
 
         arrowBtn.addEventListener("click", () => {
           void toggleAgentExpanded(agentMeta);
+        });
+        constructAgentBtn.addEventListener("click", () => {
+          void handleConstructAction(agentMeta, false);
         });
         deleteBtn.addEventListener("click", () => {
           void deleteAgentItem(agentMeta);
@@ -2225,6 +2282,56 @@
           void toggleAgentExpanded(agentMeta);
         });
 
+        card.addEventListener("dragstart", (event) => {
+          if (
+            event.target &&
+            (event.target.closest("button") ||
+              event.target.closest("textarea") ||
+              event.target.closest("input") ||
+              event.target.closest("select"))
+          ) {
+            event.preventDefault();
+            return;
+          }
+          dragState.draggedId = agentKey;
+          card.classList.add("dragging");
+          if (event.dataTransfer) {
+            event.dataTransfer.effectAllowed = "move";
+            event.dataTransfer.setData("text/plain", agentKey);
+          }
+        });
+
+        card.addEventListener("dragover", (event) => {
+          if (!dragState.draggedId || dragState.draggedId === agentKey) return;
+          event.preventDefault();
+          if (event.dataTransfer) event.dataTransfer.dropEffect = "move";
+          const rect = card.getBoundingClientRect();
+          const insertBefore = event.clientY < rect.top + rect.height / 2;
+          updateDropMarker(card, insertBefore);
+        });
+
+        card.addEventListener("dragleave", (event) => {
+          if (event.currentTarget !== card) return;
+          const related = event.relatedTarget;
+          if (related && card.contains(related)) return;
+          card.classList.remove("drop-before", "drop-after");
+        });
+
+        card.addEventListener("drop", (event) => {
+          if (!dragState.draggedId || dragState.draggedId === agentKey) return;
+          event.preventDefault();
+          const rect = card.getBoundingClientRect();
+          const insertBefore = event.clientY < rect.top + rect.height / 2;
+          moveAgent(dragState.draggedId, agentKey, insertBefore);
+          clearDropMarkers();
+        });
+
+        card.addEventListener("dragend", () => {
+          dragState.draggedId = null;
+          card.classList.remove("dragging");
+          clearDropMarkers();
+        });
+
         return card;
       }
 
@@ -2234,25 +2341,20 @@
           agentMeta.group || AGENT_GROUP_UNSORTED_ID,
           agentMeta.agent_slug
         );
-        const current = state.expandedAgentKeyByProfile[state.activeProfile] || "";
-        if (current === key) {
+        const expandedKeys = state.expandedAgentKeyByProfile[state.activeProfile] || [];
+        const isExpanded = expandedKeys.includes(key);
+        if (isExpanded) {
           const detail = state.agentDetailsByKey[key] || null;
           const okToCollapse = await confirmDiscardAgentChangesIfNeeded({ detail });
           if (!okToCollapse) return;
-          state.expandedAgentKeyByProfile[state.activeProfile] = "";
+          state.expandedAgentKeyByProfile[state.activeProfile] = expandedKeys.filter(
+            (item) => item !== key
+          );
           render();
           return;
         }
 
-        if (current && current !== key) {
-          const currentDetail = state.agentDetailsByKey[current] || null;
-          const okToSwitch = await confirmDiscardAgentChangesIfNeeded({
-            detail: currentDetail,
-          });
-          if (!okToSwitch) return;
-        }
-
-        state.expandedAgentKeyByProfile[state.activeProfile] = key;
+        state.expandedAgentKeyByProfile[state.activeProfile] = [...expandedKeys, key];
         render();
         try {
           await loadAgentDetail(
@@ -2305,14 +2407,151 @@
             agentMeta.agent_slug
           );
           delete state.agentDetailsByKey[key];
-          if (state.expandedAgentKeyByProfile[state.activeProfile] === key) {
-            state.expandedAgentKeyByProfile[state.activeProfile] = "";
-          }
+          const expandedKeys = state.expandedAgentKeyByProfile[state.activeProfile] || [];
+          state.expandedAgentKeyByProfile[state.activeProfile] = expandedKeys.filter(
+            (item) => item !== key
+          );
           render();
           setStatus(`Deleted agent "${truncateStatusName(agentMeta.title)}"`);
         } catch (_err) {
           setStatus("Agent delete failed: Server may not be running", true);
         }
+      }
+
+      async function saveDirtyAgentSections(agentMeta, detail) {
+        if (!detail) return true;
+        const dirtySections = Object.keys(detail.dirtyBySection || {}).filter(
+          (section) => detail.dirtyBySection[section]
+        );
+        for (const section of dirtySections) {
+          const response = await fetch("/agents/section/save", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              user: agentMeta.user,
+              group: agentMeta.group || AGENT_GROUP_UNSORTED_ID,
+              agent: agentMeta.agent_slug,
+              section,
+              content: detail.draftBySection[section] || "",
+            }),
+          });
+          if (!response.ok) {
+            return false;
+          }
+          detail.savedBySection[section] = detail.draftBySection[section] || "";
+          detail.dirtyBySection[section] = false;
+        }
+        return true;
+      }
+
+      function buildConstructedPrompt(detail, sectionNames, useSavedValues) {
+        const sourceMap = useSavedValues ? detail.savedBySection : detail.draftBySection;
+        const lines = [];
+        for (const section of sectionNames) {
+          const raw = (sourceMap[section] || "").replace(/\r\n/g, "\n");
+          if (!raw.trim()) continue;
+          lines.push(`${formatSectionLabel(section) || section}\n${raw.trimEnd()}`);
+        }
+        return lines.join("\n\n");
+      }
+
+      async function openConstructPreviewDialog(text) {
+        return new Promise((resolve) => {
+          dom.constructPreviewText.textContent = text;
+          dom.constructCopiedMessage.hidden = true;
+          dom.btnConstructCopy.hidden = false;
+          dom.btnConstructCancel.hidden = false;
+          dom.btnConstructOk.hidden = true;
+
+          let settled = false;
+          const settle = (value) => {
+            if (settled) return;
+            settled = true;
+            if (dom.constructDialog.open) {
+              dom.constructDialog.close();
+            }
+            cleanup();
+            resolve(value);
+          };
+
+          const onCancel = () => settle("cancel");
+          const onOk = () => settle("ok");
+          const onCopy = async () => {
+            await copyText(
+              text,
+              "Copied constructed prompt to clipboard",
+              dom.btnConstructCopy
+            );
+            dom.constructCopiedMessage.hidden = false;
+            dom.btnConstructCopy.hidden = true;
+            dom.btnConstructCancel.hidden = true;
+            dom.btnConstructOk.hidden = false;
+          };
+          const onDialogCancel = (event) => {
+            event.preventDefault();
+            settle("cancel");
+          };
+          const onClose = () => settle("cancel");
+
+          const cleanup = () => {
+            dom.btnConstructCancel.removeEventListener("click", onCancel);
+            dom.btnConstructOk.removeEventListener("click", onOk);
+            dom.btnConstructCopy.removeEventListener("click", onCopy);
+            dom.constructDialog.removeEventListener("cancel", onDialogCancel);
+            dom.constructDialog.removeEventListener("close", onClose);
+          };
+
+          dom.btnConstructCancel.addEventListener("click", onCancel);
+          dom.btnConstructOk.addEventListener("click", onOk);
+          dom.btnConstructCopy.addEventListener("click", onCopy);
+          dom.constructDialog.addEventListener("cancel", onDialogCancel);
+          dom.constructDialog.addEventListener("close", onClose);
+          dom.constructDialog.showModal();
+        });
+      }
+
+      async function handleConstructAction(agentMeta, sectionOnly) {
+        const detail = await loadAgentDetail(
+          agentMeta.user,
+          agentMeta.group || AGENT_GROUP_UNSORTED_ID,
+          agentMeta.agent_slug
+        );
+        const allSections = Array.isArray(detail.sectionOrder) ? detail.sectionOrder : [];
+        const activeSection = detail.activeSection || allSections[0] || "";
+        const sectionNames = sectionOnly
+          ? activeSection
+            ? [activeSection]
+            : []
+          : allSections;
+        if (!sectionNames.length) {
+          setStatus("No section available to construct", true);
+          return;
+        }
+
+        const isDirty = isAgentDetailDirty(detail, false);
+        let useSavedValues = false;
+        if (isDirty) {
+          const choice = await askChoiceDialog({
+            title: "You have unsaved changes.",
+            message: "Choose how to continue.",
+            primaryLabel: "Save and Construct",
+            secondaryLabel: "Cancel",
+            tertiaryLabel: "Construct Without Saving",
+          });
+          if (choice === "secondary") return;
+          if (choice === "primary") {
+            const savedOk = await saveDirtyAgentSections(agentMeta, detail);
+            if (!savedOk) {
+              setStatus("Agent section save failed: Server may not be running", true);
+              return;
+            }
+            useSavedValues = true;
+            render();
+          }
+        }
+
+        const text = buildConstructedPrompt(detail, sectionNames, useSavedValues);
+        await openConstructPreviewDialog(text);
       }
 
       function render() {
@@ -2413,8 +2652,14 @@
       async function confirmDiscardAgentChangesIfNeeded({ detail = null, sectionOnly = false } = {}) {
         let targetDetail = detail;
         if (!targetDetail) {
-          const expandedKey = state.expandedAgentKeyByProfile[state.activeProfile] || "";
-          targetDetail = expandedKey ? state.agentDetailsByKey[expandedKey] : null;
+          const expandedKeys = state.expandedAgentKeyByProfile[state.activeProfile] || [];
+          for (const expandedKey of expandedKeys) {
+            const candidate = state.agentDetailsByKey[expandedKey] || null;
+            if (candidate && isAgentDetailDirty(candidate, sectionOnly)) {
+              targetDetail = candidate;
+              break;
+            }
+          }
         }
         if (!targetDetail) return true;
         if (!isAgentDetailDirty(targetDetail, sectionOnly)) return true;
@@ -2459,6 +2704,43 @@
         void persistWithStatus(
           `Changed order of "${truncateStatusName(draggedBlock.name)}"`
         );
+      }
+
+      function moveAgent(draggedKey, targetKey, insertBefore) {
+        if (draggedKey === targetKey) return;
+        const agents = getActiveAgents();
+        const dragIndex = agents.findIndex(
+          (agent) =>
+            getAgentKey(
+              agent.user,
+              agent.group || AGENT_GROUP_UNSORTED_ID,
+              agent.agent_slug
+            ) === draggedKey
+        );
+        const targetIndex = agents.findIndex(
+          (agent) =>
+            getAgentKey(
+              agent.user,
+              agent.group || AGENT_GROUP_UNSORTED_ID,
+              agent.agent_slug
+            ) === targetKey
+        );
+        if (dragIndex < 0 || targetIndex < 0) return;
+
+        const [draggedAgent] = agents.splice(dragIndex, 1);
+        const liveTargetIndex = agents.findIndex(
+          (agent) =>
+            getAgentKey(
+              agent.user,
+              agent.group || AGENT_GROUP_UNSORTED_ID,
+              agent.agent_slug
+            ) === targetKey
+        );
+        const insertIndex = insertBefore ? liveTargetIndex : liveTargetIndex + 1;
+        agents.splice(insertIndex, 0, draggedAgent);
+        state.agentsByProfile[state.activeProfile] = agents;
+        render();
+        setStatus(`Changed order of agent "${truncateStatusName(draggedAgent.title)}"`);
       }
 
       function moveBlockToGroup(draggedId, targetGroupId) {

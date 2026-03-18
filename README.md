@@ -16,6 +16,7 @@ The project is currently a hybrid local app with:
 - Stage 2: Inline prompt text editing with dirty save/cancel/copy flows (done)
 - Stage 3: Backend agent filesystem service + Flask routes (done)
 - Stage 4: First visible agent UI layer (done)
+- Stage 5: Agent construct behavior (done)
 
 ### Prompt features currently available
 
@@ -26,6 +27,7 @@ The project is currently a hybrid local app with:
 - Dirty-state save/cancel/copy confirmation behavior
 - Prompt delete
 - Prompt reorder (collapsed cards)
+- Prompt reorder (collapsed and expanded cards)
 - Drag/drop move prompts between groups
 
 ### Agent features currently available
@@ -33,16 +35,22 @@ The project is currently a hybrid local app with:
 - Agent navigation/filter presence in left nav
 - Agent list rendering by active user/group
 - Expand/collapse agent cards
+- Multiple agent cards can remain expanded at once
+- Agent card reorder (collapsed and expanded)
 - Load existing agent sections from backend
 - Section tab switching
 - Edit/save/cancel existing section content
 - Dirty-edit discard confirmations on key navigation paths
 - Agent delete with confirmation
-- Construct buttons shown but intentionally disabled (Stage 5 not implemented yet)
+- Construct Agent Prompt + Construct Section Prompt
+- Construct preview dialog with copy flow and post-copy confirmation
+- Dirty-state construct decision flow:
+  - Save and Construct
+  - Construct Without Saving
+  - Cancel
 
 ### Agent features intentionally deferred
 
-- Agent construct logic (Stage 5)
 - Agent zip export (Stage 6)
 - Character/token counts (Stage 7)
 - Agent creation UX and section create/rename/order editing
