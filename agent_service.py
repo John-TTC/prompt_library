@@ -174,10 +174,13 @@ def _sync_agent_groups(root, user):
     if DEFAULT_AGENT_GROUP not in by_key:
         by_key[DEFAULT_AGENT_GROUP] = {
             "key": DEFAULT_AGENT_GROUP,
-            "label": "Unsorted",
+            "label": "No Group",
             "order": len(by_key),
             "createdAt": _now_iso(),
         }
+        changed = True
+    elif by_key[DEFAULT_AGENT_GROUP].get("label") != "No Group":
+        by_key[DEFAULT_AGENT_GROUP]["label"] = "No Group"
         changed = True
 
     discovered = sorted(_collect_group_dirs(user_root))
@@ -586,7 +589,7 @@ def delete_agent_group(agents_root, user, group):
     user_root, _ = _user_root(root, user)
     group_norm = _normalize_group_name(group)
     if group_norm == DEFAULT_AGENT_GROUP:
-        raise ValueError("Cannot delete Unsorted")
+        raise ValueError("Cannot delete No Group")
 
     groups = _sync_agent_groups(root, user)
     group_entry = next((item for item in groups if item["key"] == group_norm), None)

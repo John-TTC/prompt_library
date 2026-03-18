@@ -19,16 +19,20 @@ The project is currently a hybrid local app with:
 - Stage 5: Agent construct behavior (done)
 - Stage 5.1: Agent creation + section add flow + agent groups (done)
 - Stage 5.2: Prompt/Agent group parity (create, reorder, context-menu delete) (done)
+- Stage 5.3: No Group model + scroll/resize polish (done)
 
 ### Prompt features currently available
 
 - Prompt groups (including `All` and `Unsorted`) per user
+- Prompt groups use `No Group` as the built-in default (pinned first)
+- Prompt groups are filtered by selected real group (no synthetic `All Prompts` row)
 - Prompt group creation from `+ Group`
 - Prompt group drag-reorder (Prompt groups only)
-- Prompt group delete via right-click context menu (moves prompts to `Unsorted`)
+- Prompt group delete via right-click context menu (moves prompts to `No Group`)
 - Search/filter by prompt group
 - Expand/collapse prompt cards
 - Inline prompt text editing in expanded cards
+- Prompt card quick action text updated to `Copy to Clipboard`
 - Dirty-state save/cancel/copy confirmation behavior
 - Prompt delete
 - Prompt reorder (collapsed cards)
@@ -40,8 +44,10 @@ The project is currently a hybrid local app with:
 - Agent navigation/filter presence in left nav
 - Agent list rendering by active user/group
 - Agent group creation in Agent mode (`+ Group`)
+- Agent groups use `No Group` as the built-in default (pinned first)
+- Agent groups are filtered by selected real group (no synthetic `All Agents` row)
 - Agent group drag-reorder (Agent groups only)
-- Agent group delete via right-click context menu (moves agents to `Unsorted`)
+- Agent group delete via right-click context menu (moves agents to `No Group`)
 - Agent groups persisted as metadata + real folders (including empty groups)
 - Agent drag/drop assignment to Agent groups in sidebar
 - Expand/collapse agent cards
@@ -85,6 +91,10 @@ agents/<user>/<group>/<agent>/
 agents/<user>/agent-groups.json
   # persisted Agent-group metadata: key, label, order, optional createdAt
 ```
+
+UI notes:
+- The page now handles normal vertical scrolling for long Prompt/Agent lists.
+- Expanded Prompt/Agent cards are not capped by a fixed viewport max-height.
 
 Section keys are canonically handled as lowercase names (e.g. `role`, `rules`) with compatibility for legacy values like `role.md`.
 
