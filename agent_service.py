@@ -574,6 +574,116 @@ def add_section(agents_root, user, group, agent_slug, section_name):
     return {"ok": True, "section": section_norm, "section_order": section_order_norm}
 
 
+def rename_section(agents_root, user, group, agent_slug, from_section, to_section):
+    root = Path(agents_root)
+    agent_dir, _, _, _ = _agent_dir(root, user, group, agent_slug)
+    agent_json = _agent_json_path(agent_dir)
+    if not agent_json.exists():
+        raise FileNotFoundError("Agent not found")
+
+    from_norm = _normalize_section_key(from_section)
+    to_norm = _normalize_section_key(to_section)
+    if from_norm == to_norm:
+        return {"ok": True, "section": to_norm}
+
+    payload = _read_json(agent_json)
+    section_order_raw = payload.get("section_order", list(DEFAULT_SECTION_ORDER))
+    section_order_norm = []
+    seen = set()
+    if isinstance(section_order_raw, list):
+        for name in section_order_raw:
+            try:
+                normalized = _normalize_section_key(name)
+            except ValueError:
+                continue
+            if normalized in seen:
+                continue
+            seen.add(normalized)
+            section_order_norm.append(normalized)
+    if not section_order_norm:
+        section_order_norm = list(DEFAULT_SECTION_ORDER)
+
+    if from_norm not in section_order_norm:
+        raise ValueError("Section not found")
+    if to_norm in section_order_norm:
+        raise ValueError("Section already exists")
+
+    old_file_name, _ = _section_file_name(from_norm)
+    new_file_name, _ = _section_file_name(to_norm)
+    old_path = agent_dir / old_file_name
+    new_path = agent_dir / new_file_name
+    _ensure_within_root(root, old_path)
+    _ensure_within_root(root, new_path)
+    if new_path.exists():
+        raise FileExistsError("Target section file already exists")
+
+    legacy_old_file_name, _ = _legacy_section_file_name(from_norm)
+    legacy_old_path = agent_dir / legacy_old_file_name
+    _ensure_within_root(root, legacy_old_path)
+
+    source_path = old_path if old_path.exists() else legacy_old_path
+    if source_path.exists():
+        shutil.move(str(source_path), str(new_path))
+    else:
+        _write_text(new_path, "")
+
+    section_order_next = [to_norm if name == from_norm else name for name in section_order_norm]
+    payload["section_order"] = section_order_next
+    _write_json(agent_json, payload)
+
+    return {"ok": True, "section": to_norm, "section_order": section_order_next}
+
+
+def delete_section(agents_root, user, group, agent_slug, section_name):
+    root = Path(agents_root)
+    agent_dir, _, _, _ = _agent_dir(root, user, group, agent_slug)
+    agent_json = _agent_json_path(agent_dir)
+    if not agent_json.exists():
+        raise FileNotFoundError("Agent not found")
+
+    section_norm = _normalize_section_key(section_name)
+
+    payload = _read_json(agent_json)
+    section_order_raw = payload.get("section_order", list(DEFAULT_SECTION_ORDER))
+    section_order_norm = []
+    seen = set()
+    if isinstance(section_order_raw, list):
+        for name in section_order_raw:
+            try:
+                normalized = _normalize_section_key(name)
+            except ValueError:
+                continue
+            if normalized in seen:
+                continue
+            seen.add(normalized)
+            section_order_norm.append(normalized)
+    if not section_order_norm:
+        section_order_norm = list(DEFAULT_SECTION_ORDER)
+
+    if section_norm not in section_order_norm:
+        raise ValueError("Section not found")
+    if len(section_order_norm) <= 1:
+        raise ValueError("Cannot delete the last section")
+
+    section_order_next = [name for name in section_order_norm if name != section_norm]
+    payload["section_order"] = section_order_next
+    _write_json(agent_json, payload)
+
+    file_name, _ = _section_file_name(section_norm)
+    section_path = agent_dir / file_name
+    _ensure_within_root(root, section_path)
+    if section_path.exists():
+        section_path.unlink()
+
+    legacy_file_name, _ = _legacy_section_file_name(section_norm)
+    legacy_path = agent_dir / legacy_file_name
+    _ensure_within_root(root, legacy_path)
+    if legacy_path.exists() and legacy_path != section_path:
+        legacy_path.unlink()
+
+    return {"ok": True, "section": section_norm, "section_order": section_order_next}
+
+
 def create_agent(
     agents_root,
     user,

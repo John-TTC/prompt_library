@@ -394,6 +394,58 @@ def add_agent_section():
     return jsonify(result)
 
 
+@app.route("/agents/section/rename", methods=["POST"])
+def rename_agent_section():
+    payload = request.get_json(force=True) or {}
+    user = str(payload.get("user", "")).strip()
+    group = str(payload.get("group", "")).strip()
+    agent_slug = str(payload.get("agent", "")).strip()
+    from_section = str(payload.get("from_section", "")).strip()
+    to_section = str(payload.get("to_section", "")).strip()
+    if not user or not group or not agent_slug or not from_section or not to_section:
+        return jsonify({"error": "Missing user/group/agent/from_section/to_section"}), 400
+    try:
+        result = agent_service.rename_section(
+            AGENTS_ROOT,
+            user=user,
+            group=group,
+            agent_slug=agent_slug,
+            from_section=from_section,
+            to_section=to_section,
+        )
+    except ValueError as err:
+        return jsonify({"error": str(err)}), 400
+    except FileNotFoundError as err:
+        return jsonify({"error": str(err)}), 404
+    except FileExistsError as err:
+        return jsonify({"error": str(err)}), 409
+    return jsonify(result)
+
+
+@app.route("/agents/section/delete", methods=["POST"])
+def delete_agent_section():
+    payload = request.get_json(force=True) or {}
+    user = str(payload.get("user", "")).strip()
+    group = str(payload.get("group", "")).strip()
+    agent_slug = str(payload.get("agent", "")).strip()
+    section = str(payload.get("section", "")).strip()
+    if not user or not group or not agent_slug or not section:
+        return jsonify({"error": "Missing user/group/agent/section"}), 400
+    try:
+        result = agent_service.delete_section(
+            AGENTS_ROOT,
+            user=user,
+            group=group,
+            agent_slug=agent_slug,
+            section_name=section,
+        )
+    except ValueError as err:
+        return jsonify({"error": str(err)}), 400
+    except FileNotFoundError as err:
+        return jsonify({"error": str(err)}), 404
+    return jsonify(result)
+
+
 @app.route("/agents/delete", methods=["POST"])
 def delete_agent():
     payload = request.get_json(force=True) or {}

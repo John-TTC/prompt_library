@@ -773,7 +773,7 @@
       <h2 id="dialogTitle" class="dialog-title">New Prompt</h2>
 
       <label>
-        Name
+        Title
         <input id="nameInput" name="name" maxlength="120" required />
       </label>
 
@@ -787,14 +787,9 @@
         <select id="groupSelect" name="group"></select>
       </label>
 
-      <label>
-        Full Prompt
-        <textarea id="contextInput" class="context-input" name="context" required></textarea>
-      </label>
-
       <div class="dialog-actions">
         <button type="button" id="btnCancelDialog">Cancel</button>
-        <button type="submit" class="btn-primary" id="btnSaveDialog">Save</button>
+        <button type="submit" class="btn-primary" id="btnSaveDialog">Create Prompt</button>
       </div>
     </form>
   </dialog>
@@ -828,8 +823,16 @@
     <form id="agentCreateForm" method="dialog" class="dialog-content">
       <h2 class="dialog-title">Create Agent</h2>
       <label>
-        Agent Name
+        Title
         <input id="agentNameInput" name="agentName" maxlength="120" required />
+      </label>
+      <label>
+        Description
+        <textarea id="agentDescriptionInput" name="agentDescription" rows="4" maxlength="800" required></textarea>
+      </label>
+      <label>
+        Group
+        <select id="agentGroupSelect" name="agentGroup"></select>
       </label>
       <div class="dialog-actions">
         <button type="button" id="btnCancelAgentCreate">Cancel</button>
@@ -839,13 +842,18 @@
   </dialog>
 
   <div id="groupContextMenu" class="group-context-menu" hidden>
-    <button id="groupContextEditNameBtn" type="button">Edit Name</button>
+    <button id="groupContextEditNameBtn" type="button">Rename</button>
     <button id="groupContextDeleteBtn" type="button">Delete</button>
   </div>
 
   <div id="cardContextMenu" class="card-context-menu" hidden>
     <button id="cardContextEditNameBtn" type="button">Edit Name</button>
     <button id="cardContextEditDescriptionBtn" type="button">Edit Description</button>
+  </div>
+
+  <div id="agentTabContextMenu" class="card-context-menu" hidden>
+    <button id="agentTabRenameBtn" type="button">Rename</button>
+    <button id="agentTabDeleteBtn" type="button">Delete</button>
   </div>
 
   <script>
@@ -867,7 +875,6 @@
         dialogTitle: document.getElementById("dialogTitle"),
         nameInput: document.getElementById("nameInput"),
         descriptionInput: document.getElementById("descriptionInput"),
-        contextInput: document.getElementById("contextInput"),
         groupSelect: document.getElementById("groupSelect"),
         btnCancelDialog: document.getElementById("btnCancelDialog"),
         userSelect: document.getElementById("userSelect"),
@@ -886,6 +893,8 @@
         agentCreateDialog: document.getElementById("agentCreateDialog"),
         agentCreateForm: document.getElementById("agentCreateForm"),
         agentNameInput: document.getElementById("agentNameInput"),
+        agentDescriptionInput: document.getElementById("agentDescriptionInput"),
+        agentGroupSelect: document.getElementById("agentGroupSelect"),
         btnCancelAgentCreate: document.getElementById("btnCancelAgentCreate"),
         groupContextMenu: document.getElementById("groupContextMenu"),
         groupContextEditNameBtn: document.getElementById("groupContextEditNameBtn"),
@@ -893,6 +902,9 @@
         cardContextMenu: document.getElementById("cardContextMenu"),
         cardContextEditNameBtn: document.getElementById("cardContextEditNameBtn"),
         cardContextEditDescriptionBtn: document.getElementById("cardContextEditDescriptionBtn"),
+        agentTabContextMenu: document.getElementById("agentTabContextMenu"),
+        agentTabRenameBtn: document.getElementById("agentTabRenameBtn"),
+        agentTabDeleteBtn: document.getElementById("agentTabDeleteBtn"),
       };
 
       const DEFAULT_GROUP_ID = "group-unsorted";
@@ -917,11 +929,12 @@
         searchByProfile: {},
         agentSearchByProfile: {},
         promptUiByProfile: {},
+        undoByProfile: {},
+        pendingPromptEditorFocusId: "",
         pendingAgentEditorFocus: null,
         contextMenuTarget: null,
         cardContextTarget: null,
-        undoSnapshot: null,
-        undoStatusMessage: "",
+        agentTabContextTarget: null,
       };
 
       const dragState = {
@@ -957,6 +970,9 @@
         }
         if (!state.promptUiByProfile[profileId] || typeof state.promptUiByProfile[profileId] !== "object") {
           state.promptUiByProfile[profileId] = {};
+        }
+        if (!state.undoByProfile[profileId] || typeof state.undoByProfile[profileId] !== "object") {
+          state.undoByProfile[profileId] = { prompts: null, agents: null };
         }
       }
 
@@ -1095,6 +1111,10 @@
       }
 
       function resolveCreateAgentGroupId() {
+        const selectedFromDialog = dom.agentGroupSelect
+          ? (dom.agentGroupSelect.value || "").trim()
+          : "";
+        if (selectedFromDialog) return selectedFromDialog;
         const selectedGroup = getActiveAgentGroupId();
         return selectedGroup || AGENT_GROUP_UNSORTED_ID;
       }
@@ -1283,6 +1303,24 @@
         return blocks.map((block) => ({ ...block }));
       }
 
+      function cloneAgents(agents) {
+        return Array.isArray(agents) ? agents.map((agent) => ({ ...agent })) : [];
+      }
+
+      function cloneAgentDetail(detail) {
+        if (!detail || typeof detail !== "object") return null;
+        return {
+          activeSection: detail.activeSection || "",
+          sectionOrder: Array.isArray(detail.sectionOrder) ? [...detail.sectionOrder] : [],
+          savedBySection: { ...(detail.savedBySection || {}) },
+          draftBySection: { ...(detail.draftBySection || {}) },
+          dirtyBySection: { ...(detail.dirtyBySection || {}) },
+          pendingNewSection: detail.pendingNewSection
+            ? { ...detail.pendingNewSection }
+            : undefined,
+        };
+      }
+
       function withReindexedOrder(items) {
         return items.map((item, idx) => ({
           ...item,
@@ -1466,7 +1504,6 @@
         if (!okToSwitch) return;
         state.activeProfile = profileId;
         initProfileState(profileId);
-        clearUndoSnapshot();
         if (dom.contextDialog.open) {
           closeDialog();
         }
@@ -1507,19 +1544,48 @@
         })();
       }
 
-      function setUndoSnapshot(snapshot, undoStatusMessage) {
-        state.undoSnapshot = snapshot && snapshot.length >= 0 ? snapshot : null;
-        state.undoStatusMessage = undoStatusMessage || "Undid last action";
-        dom.btnUndoStatus.hidden = !state.undoSnapshot;
+      function getUndoBuffer(profileId = state.activeProfile) {
+        if (!state.undoByProfile[profileId] || typeof state.undoByProfile[profileId] !== "object") {
+          state.undoByProfile[profileId] = { prompts: null, agents: null };
+        }
+        return state.undoByProfile[profileId];
       }
 
-      function clearUndoSnapshot() {
-        state.undoSnapshot = null;
-        state.undoStatusMessage = "";
-        dom.btnUndoStatus.hidden = true;
+      function getUndoAction(mode = state.activeMode, profileId = state.activeProfile) {
+        const buffer = getUndoBuffer(profileId);
+        const normalizedMode = mode === "agents" ? "agents" : "prompts";
+        return buffer[normalizedMode] || null;
       }
 
-      function setStatus(message, isError = false) {
+      function syncUndoButtonVisibility() {
+        dom.btnUndoStatus.hidden = !getUndoAction();
+      }
+
+      function syncUndoPinnedStatus() {
+        const action = getUndoAction();
+        if (!action || !action.statusMessage) return;
+        setStatus(action.statusMessage, false, { bypassUndoPin: true });
+      }
+
+      function setUndoAction(mode, action) {
+        const buffer = getUndoBuffer();
+        const normalizedMode = mode === "agents" ? "agents" : "prompts";
+        buffer[normalizedMode] = action || null;
+        syncUndoButtonVisibility();
+        if (normalizedMode === state.activeMode) {
+          syncUndoPinnedStatus();
+        }
+      }
+
+      function clearUndoAction(mode = state.activeMode) {
+        setUndoAction(mode, null);
+      }
+
+      function setStatus(message, isError = false, options = {}) {
+        const bypassUndoPin = !!(options && options.bypassUndoPin);
+        if (!isError && !bypassUndoPin && getUndoAction()) {
+          return;
+        }
         const normalizedMessage =
           typeof message === "string" ? message.replace(/\.$/, "") : "";
         dom.statusText.textContent = normalizedMessage;
@@ -2011,6 +2077,7 @@
 
       function openGroupContextMenu(x, y, target) {
         closeCardContextMenu();
+        closeAgentTabContextMenu();
         state.contextMenuTarget = target;
         const menu = dom.groupContextMenu;
         dom.groupContextEditNameBtn.disabled = !target.renameable;
@@ -2032,6 +2099,7 @@
 
       function openCardContextMenu(x, y, target) {
         closeGroupContextMenu();
+        closeAgentTabContextMenu();
         state.cardContextTarget = target;
         const menu = dom.cardContextMenu;
         menu.hidden = false;
@@ -2049,9 +2117,30 @@
         dom.cardContextMenu.hidden = true;
       }
 
+      function openAgentTabContextMenu(x, y, target) {
+        closeGroupContextMenu();
+        closeCardContextMenu();
+        state.agentTabContextTarget = target;
+        const menu = dom.agentTabContextMenu;
+        menu.hidden = false;
+        const viewportWidth = window.innerWidth;
+        const viewportHeight = window.innerHeight;
+        const rect = menu.getBoundingClientRect();
+        const left = Math.min(Math.max(8, x), viewportWidth - rect.width - 8);
+        const top = Math.min(Math.max(8, y), viewportHeight - rect.height - 8);
+        menu.style.left = `${left}px`;
+        menu.style.top = `${top}px`;
+      }
+
+      function closeAgentTabContextMenu() {
+        state.agentTabContextTarget = null;
+        dom.agentTabContextMenu.hidden = true;
+      }
+
       function closeAllContextMenus() {
         closeGroupContextMenu();
         closeCardContextMenu();
+        closeAgentTabContextMenu();
       }
 
       function focusEditableElementText(element) {
@@ -2315,10 +2404,12 @@
           isPromptDirty = false;
           updatePromptHeaderMeta();
           updateInlinePromptState();
-          setUndoSnapshot(
-            previousBlocks,
-            `Restored "${truncateStatusName(block.name)}"`
-          );
+          setUndoAction("prompts", {
+            kind: "prompt-blocks",
+            snapshot: cloneBlocks(previousBlocks),
+            message: `Restored "${truncateStatusName(block.name)}"`,
+            statusMessage: `Saved "${truncateStatusName(block.name)}"`,
+          });
 
           try {
             await saveToServer();
@@ -2416,6 +2507,12 @@
             block.description = nextValue;
             description.textContent = nextValue;
           }
+          setUndoAction("prompts", {
+            kind: "prompt-blocks",
+            snapshot: cloneBlocks(previousBlocks),
+            message: `Restored ${fieldName === "name" ? "name" : "description"} for "${truncateStatusName(block.name)}"`,
+            statusMessage: `Updated ${fieldName === "name" ? "name" : "description"} for "${truncateStatusName(block.name)}"`,
+          });
           render();
           try {
             await saveToServer();
@@ -2576,6 +2673,13 @@
         applyExpandedVisual(isExpandedState);
         syncCardDraggable();
         updateInlinePromptState();
+        if (state.pendingPromptEditorFocusId === block.id && body.classList.contains("open")) {
+          state.pendingPromptEditorFocusId = "";
+          window.setTimeout(() => {
+            promptEditor.focus();
+            promptEditor.setSelectionRange(promptEditor.value.length, promptEditor.value.length);
+          }, 0);
+        }
         return card;
       }
 
@@ -2692,6 +2796,7 @@
               "agent-tab-btn" + (sectionName === activeSection ? " active" : "");
             tabBtn.textContent = formatSectionLabel(sectionName) || sectionName;
             tabBtn.title = sectionName;
+            tabBtn.dataset.hasAgentTabContext = "true";
             tabBtn.addEventListener("click", () => {
               void (async () => {
                 const okToSwitch = await confirmDiscardAgentChangesIfNeeded({
@@ -2702,6 +2807,23 @@
                 detail.activeSection = sectionName;
                 render();
               })();
+            });
+            tabBtn.addEventListener("contextmenu", (event) => {
+              event.preventDefault();
+              event.stopPropagation();
+              openAgentTabContextMenu(event.clientX, event.clientY, {
+                rename: () => {
+                  const rawName = window.prompt(
+                    "Rename section:",
+                    formatSectionLabel(sectionName) || sectionName
+                  );
+                  if (rawName === null) return;
+                  void renameAgentSection(agentMeta, detail, sectionName, rawName);
+                },
+                remove: () => {
+                  void deleteAgentSection(agentMeta, detail, sectionName);
+                },
+              });
             });
             tabs.appendChild(tabBtn);
           }
@@ -2826,6 +2948,7 @@
 
           saveBtn.addEventListener("click", async () => {
             if (!activeSection || !detail.dirtyBySection[activeSection]) return;
+            const previousContent = detail.savedBySection[activeSection] || "";
             try {
               const response = await fetch("/agents/section/save", {
                 method: "POST",
@@ -2841,6 +2964,16 @@
               if (!response.ok) throw new Error("Save failed");
               detail.savedBySection[activeSection] = detail.draftBySection[activeSection] || "";
               detail.dirtyBySection[activeSection] = false;
+              setUndoAction("agents", {
+                kind: "agent-section-save",
+                user: agentMeta.user,
+                group: agentMeta.group || AGENT_GROUP_UNSORTED_ID,
+                agent: agentMeta.agent_slug,
+                section: activeSection,
+                previousContent,
+                message: `Restored ${formatSectionLabel(activeSection) || activeSection} section for "${truncateStatusName(agentMeta.title)}"`,
+                statusMessage: `Saved ${agentMeta.title} ${activeSection} section`,
+              });
               updateSectionMetaAndTotals();
               syncDirtyState();
               setStatus(`Saved ${agentMeta.title} ${activeSection} section`);
@@ -2963,6 +3096,17 @@
               agentMeta.description = nextValue;
               description.textContent = nextValue || "No description";
             }
+            setUndoAction("agents", {
+              kind: "agent-meta-save",
+              user: agentMeta.user,
+              group: agentMeta.group || AGENT_GROUP_UNSORTED_ID,
+              agent: agentMeta.agent_slug,
+              previousTitle: fieldName === "title" ? previousValue : agentMeta.title,
+              previousDescription:
+                fieldName === "description" ? previousValue : (agentMeta.description || ""),
+              message: `Restored ${fieldName === "title" ? "name" : "description"} for "${truncateStatusName(agentMeta.title)}"`,
+              statusMessage: `Updated ${fieldName === "title" ? "name" : "description"} for "${truncateStatusName(agentMeta.title)}"`,
+            });
             render();
             setStatus(
               `Updated ${fieldName === "title" ? "name" : "description"} for "${truncateStatusName(agentMeta.title)}"`
@@ -3116,6 +3260,32 @@
         });
         if (choice !== "primary") return;
 
+        const beforeAgents = cloneAgents(getActiveAgents());
+        const beforeExpanded = [
+          ...(state.expandedAgentKeyByProfile[state.activeProfile] || []),
+        ];
+        const beforePendingFocus = state.pendingAgentEditorFocus
+          ? { ...state.pendingAgentEditorFocus }
+          : null;
+        const key = getAgentKey(
+          agentMeta.user,
+          agentMeta.group || AGENT_GROUP_UNSORTED_ID,
+          agentMeta.agent_slug
+        );
+        let detailSnapshot = cloneAgentDetail(state.agentDetailsByKey[key] || null);
+        if (!detailSnapshot) {
+          try {
+            const loaded = await loadAgentDetail(
+              agentMeta.user,
+              agentMeta.group || AGENT_GROUP_UNSORTED_ID,
+              agentMeta.agent_slug
+            );
+            detailSnapshot = cloneAgentDetail(loaded);
+          } catch (_err) {
+            detailSnapshot = null;
+          }
+        }
+
         try {
           const response = await fetch("/agents/delete", {
             method: "POST",
@@ -3138,16 +3308,35 @@
               )
           );
           state.agentsByProfile[state.activeProfile] = list;
-          const key = getAgentKey(
-            agentMeta.user,
-            agentMeta.group || AGENT_GROUP_UNSORTED_ID,
-            agentMeta.agent_slug
-          );
           delete state.agentDetailsByKey[key];
           const expandedKeys = state.expandedAgentKeyByProfile[state.activeProfile] || [];
           state.expandedAgentKeyByProfile[state.activeProfile] = expandedKeys.filter(
             (item) => item !== key
           );
+          const savedBySection = detailSnapshot && detailSnapshot.savedBySection
+            ? { ...detailSnapshot.savedBySection }
+            : {};
+          const sectionOrder = detailSnapshot && Array.isArray(detailSnapshot.sectionOrder)
+            ? [...detailSnapshot.sectionOrder]
+            : Array.isArray(agentMeta.section_order)
+              ? [...agentMeta.section_order]
+              : ["role"];
+          setUndoAction("agents", {
+            kind: "agent-delete",
+            user: agentMeta.user,
+            group: agentMeta.group || AGENT_GROUP_UNSORTED_ID,
+            agent: agentMeta.agent_slug,
+            title: agentMeta.title,
+            description: agentMeta.description || "",
+            sectionOrder,
+            savedBySection,
+            detail: detailSnapshot,
+            snapshot: beforeAgents,
+            expandedKeys: beforeExpanded,
+            pendingFocus: beforePendingFocus,
+            message: `Restored agent "${truncateStatusName(agentMeta.title)}"`,
+            statusMessage: `Deleted agent "${truncateStatusName(agentMeta.title)}"`,
+          });
           render();
           setStatus(`Deleted agent "${truncateStatusName(agentMeta.title)}"`);
         } catch (_err) {
@@ -3300,6 +3489,8 @@
         dom.btnAddGroup.hidden = false;
         dom.btnAddAgent.hidden = state.activeMode !== "agents";
         syncSearchInputFromState();
+        syncUndoButtonVisibility();
+        syncUndoPinnedStatus();
         updateCountLabel();
         if (state.activeMode === "agents") {
           const visibleAgents = getVisibleAgents();
@@ -3439,7 +3630,12 @@
         activeBlocks.splice(insertIndex, 0, draggedBlock);
         setActiveBlocks(activeBlocks);
 
-        setUndoSnapshot(previousBlocks, "Previous order restored");
+        setUndoAction("prompts", {
+          kind: "prompt-blocks",
+          snapshot: cloneBlocks(previousBlocks),
+          message: "Previous order restored",
+          statusMessage: `Changed order of "${truncateStatusName(draggedBlock.name)}"`,
+        });
         render();
         void persistWithStatus(
           `Changed order of "${truncateStatusName(draggedBlock.name)}"`
@@ -3449,6 +3645,10 @@
       function moveAgent(draggedKey, targetKey, insertBefore) {
         if (draggedKey === targetKey) return;
         const agents = getActiveAgents();
+        const previousAgents = cloneAgents(agents);
+        const previousExpanded = [
+          ...(state.expandedAgentKeyByProfile[state.activeProfile] || []),
+        ];
         const dragIndex = agents.findIndex(
           (agent) =>
             getAgentKey(
@@ -3479,12 +3679,29 @@
         const insertIndex = insertBefore ? liveTargetIndex : liveTargetIndex + 1;
         agents.splice(insertIndex, 0, draggedAgent);
         state.agentsByProfile[state.activeProfile] = agents;
+        setUndoAction("agents", {
+          kind: "agent-list",
+          snapshot: previousAgents,
+          expandedKeys: previousExpanded,
+          pendingFocus: state.pendingAgentEditorFocus
+            ? { ...state.pendingAgentEditorFocus }
+            : null,
+          message: "Previous agent order restored",
+          statusMessage: `Changed order of agent "${truncateStatusName(draggedAgent.title)}"`,
+        });
         render();
         setStatus(`Changed order of agent "${truncateStatusName(draggedAgent.title)}"`);
       }
 
       async function moveAgentToGroup(draggedKey, targetGroupId) {
         const agents = getActiveAgents();
+        const previousAgents = cloneAgents(agents);
+        const previousExpanded = [
+          ...(state.expandedAgentKeyByProfile[state.activeProfile] || []),
+        ];
+        const previousPendingFocus = state.pendingAgentEditorFocus
+          ? { ...state.pendingAgentEditorFocus }
+          : null;
         const agent = agents.find(
           (item) =>
             getAgentKey(
@@ -3546,6 +3763,20 @@
             upsertActiveAgentGroupMeta({ key: targetGroupId, label: targetGroupId });
           }
 
+          setUndoAction("agents", {
+            kind: "agent-group-move",
+            user: agent.user,
+            agent: agent.agent_slug,
+            fromGroup,
+            toGroup: targetGroupId,
+            previousKey,
+            nextKey,
+            snapshot: previousAgents,
+            expandedKeys: previousExpanded,
+            pendingFocus: previousPendingFocus,
+            message: `Restored "${truncateStatusName(agent.title)}" to ${getAgentGroupLabel(fromGroup)}`,
+            statusMessage: `Moved "${truncateStatusName(agent.title)}" to ${targetGroupId}`,
+          });
           render();
           setStatus(
             `Moved "${truncateStatusName(agent.title)}" to ${targetGroupId}`
@@ -3648,10 +3879,12 @@
         activeBlocks.push(moved);
         setActiveBlocks(activeBlocks);
 
-        setUndoSnapshot(
-          previousBlocks,
-          `Restored "${truncateStatusName(moved.name)}" to ${getGroupLabel(previousBlocks[dragIndex].groupId || DEFAULT_GROUP_ID)}`
-        );
+        setUndoAction("prompts", {
+          kind: "prompt-blocks",
+          snapshot: cloneBlocks(previousBlocks),
+          message: `Restored "${truncateStatusName(moved.name)}" to ${getGroupLabel(previousBlocks[dragIndex].groupId || DEFAULT_GROUP_ID)}`,
+          statusMessage: `Moved "${truncateStatusName(moved.name)}" to ${getGroupLabel(targetGroupId)}`,
+        });
         render();
         void persistWithStatus(
           `Moved "${truncateStatusName(moved.name)}" to ${getGroupLabel(targetGroupId)}`
@@ -3738,6 +3971,7 @@
 
       function openAgentCreateDialog() {
         dom.agentCreateForm.reset();
+        populateAgentGroupSelect(resolveCreateAgentGroupId());
         dom.agentCreateDialog.showModal();
         dom.agentNameInput.focus();
       }
@@ -3748,8 +3982,13 @@
 
       async function createAgentFromDialog() {
         const title = dom.agentNameInput.value.trim();
+        const description = dom.agentDescriptionInput.value.trim();
         if (!title) {
           setStatus("Agent name is required", true);
+          return;
+        }
+        if (!description) {
+          setStatus("Agent description is required", true);
           return;
         }
         const agentSlug = slugifyName(title);
@@ -3769,7 +4008,7 @@
               group: groupId,
               agent: agentSlug,
               title,
-              description: "",
+              description,
               section_order: ["role"],
             }),
           });
@@ -3785,16 +4024,36 @@
           const created = normalizeAgentMeta(parsed.agent || {});
           closeAgentCreateDialog();
           state.agentSearchByProfile[state.activeProfile] = "";
-          await loadAgentsForProfile(state.activeProfile);
+          state.activeMode = "agents";
+          setActiveAgentGroupId(groupId);
+          saveActiveAgentGroupsLocal();
+          syncSearchInputFromState();
           if (created) {
             const knownAgentGroups = getActiveAgentGroups();
             if (!knownAgentGroups.some((group) => group.key === created.group)) {
               upsertActiveAgentGroupMeta({ key: created.group, label: created.group });
             }
+            const currentAgents = getActiveAgents();
+            const createdKey = getAgentKey(created.user, created.group, created.agent_slug);
+            const deduped = currentAgents.filter(
+              (item) =>
+                getAgentKey(
+                  item.user,
+                  item.group || AGENT_GROUP_UNSORTED_ID,
+                  item.agent_slug
+                ) !== createdKey
+            );
+            const sameGroup = deduped.filter(
+              (item) => (item.group || AGENT_GROUP_UNSORTED_ID) === created.group
+            );
+            const otherGroups = deduped.filter(
+              (item) => (item.group || AGENT_GROUP_UNSORTED_ID) !== created.group
+            );
+            state.agentsByProfile[state.activeProfile] = [created, ...sameGroup, ...otherGroups];
             const key = getAgentKey(created.user, created.group, created.agent_slug);
             const expanded = state.expandedAgentKeyByProfile[state.activeProfile] || [];
             if (!expanded.includes(key)) {
-              state.expandedAgentKeyByProfile[state.activeProfile] = [...expanded, key];
+              state.expandedAgentKeyByProfile[state.activeProfile] = [key, ...expanded];
             }
             delete state.agentDetailsByKey[key];
             const detail = await loadAgentDetail(created.user, created.group, created.agent_slug);
@@ -3806,7 +4065,6 @@
               section: detail.activeSection || "",
             };
           }
-          syncSearchInputFromState();
           render();
           setStatus(`Created agent "${truncateStatusName(title)}"`);
         } catch (err) {
@@ -3897,6 +4155,186 @@
         }
       }
 
+      async function renameAgentSection(agentMeta, detail, fromSection, nextLabelRaw) {
+        if (!agentMeta || !detail) return;
+        const nextLabel = String(nextLabelRaw || "").trim();
+        if (!nextLabel) {
+          setStatus("Section name is required", true);
+          return;
+        }
+        const nextSection = normalizeSectionKey(nextLabel);
+        if (!nextSection) {
+          setStatus("Section name must include letters or numbers", true);
+          return;
+        }
+        const fromNormalized = normalizeSectionKey(fromSection);
+        if (!fromNormalized) return;
+        if (nextSection === fromNormalized) return;
+        if (detail.sectionOrder.includes(nextSection)) {
+          setStatus(`Section "${formatSectionLabel(nextSection) || nextSection}" already exists`, true);
+          return;
+        }
+
+        const okToContinue = await confirmDiscardAgentChangesIfNeeded({
+          detail,
+          sectionOnly: false,
+        });
+        if (!okToContinue) return;
+
+        try {
+          const response = await fetch("/agents/section/rename", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              user: agentMeta.user,
+              group: agentMeta.group || AGENT_GROUP_UNSORTED_ID,
+              agent: agentMeta.agent_slug,
+              from_section: fromNormalized,
+              to_section: nextSection,
+            }),
+          });
+          const parsed = await response.json().catch(() => ({}));
+          if (!response.ok) {
+            const message =
+              parsed && typeof parsed.error === "string"
+                ? parsed.error
+                : "Section rename failed";
+            throw new Error(message);
+          }
+
+          const renamedSection =
+            normalizeSectionKey(parsed.section || nextSection) || nextSection;
+          const nextOrderRaw = Array.isArray(parsed.section_order)
+            ? parsed.section_order
+            : detail.sectionOrder.map((name) =>
+                name === fromNormalized ? renamedSection : name
+              );
+          const nextOrder = [];
+          const seen = new Set();
+          for (const name of nextOrderRaw) {
+            const normalized = normalizeSectionKey(name);
+            if (!normalized || seen.has(normalized)) continue;
+            seen.add(normalized);
+            nextOrder.push(normalized);
+          }
+          detail.sectionOrder = nextOrder;
+
+          const savedValue = detail.savedBySection[fromNormalized] || "";
+          const draftValue = detail.draftBySection[fromNormalized] || "";
+          const dirtyValue = !!detail.dirtyBySection[fromNormalized];
+          delete detail.savedBySection[fromNormalized];
+          delete detail.draftBySection[fromNormalized];
+          delete detail.dirtyBySection[fromNormalized];
+          detail.savedBySection[renamedSection] = savedValue;
+          detail.draftBySection[renamedSection] = draftValue;
+          detail.dirtyBySection[renamedSection] = dirtyValue;
+          if (detail.activeSection === fromNormalized) {
+            detail.activeSection = renamedSection;
+          }
+
+          const activeAgents = getActiveAgents();
+          const targetMeta = activeAgents.find(
+            (item) =>
+              item.user === agentMeta.user &&
+              (item.group || AGENT_GROUP_UNSORTED_ID) ===
+                (agentMeta.group || AGENT_GROUP_UNSORTED_ID) &&
+              item.agent_slug === agentMeta.agent_slug
+          );
+          if (targetMeta) {
+            targetMeta.section_order = [...detail.sectionOrder];
+          }
+          render();
+          setStatus(
+            `Renamed section to "${formatSectionLabel(renamedSection) || renamedSection}" in "${truncateStatusName(agentMeta.title)}"`
+          );
+        } catch (err) {
+          const message =
+            err instanceof Error ? err.message : "Section rename failed";
+          setStatus(message, true);
+        }
+      }
+
+      async function deleteAgentSection(agentMeta, detail, sectionName) {
+        if (!agentMeta || !detail) return;
+        const sectionNormalized = normalizeSectionKey(sectionName);
+        if (!sectionNormalized) return;
+        const choice = await askChoiceDialog({
+          title: "Delete this section?",
+          message: `Delete ${formatSectionLabel(sectionNormalized) || sectionNormalized} section from "${truncateStatusName(agentMeta.title)}"?`,
+          primaryLabel: "Delete Section",
+          secondaryLabel: "Cancel",
+        });
+        if (choice !== "primary") return;
+
+        const okToContinue = await confirmDiscardAgentChangesIfNeeded({
+          detail,
+          sectionOnly: false,
+        });
+        if (!okToContinue) return;
+
+        try {
+          const response = await fetch("/agents/section/delete", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              user: agentMeta.user,
+              group: agentMeta.group || AGENT_GROUP_UNSORTED_ID,
+              agent: agentMeta.agent_slug,
+              section: sectionNormalized,
+            }),
+          });
+          const parsed = await response.json().catch(() => ({}));
+          if (!response.ok) {
+            const message =
+              parsed && typeof parsed.error === "string"
+                ? parsed.error
+                : "Section delete failed";
+            throw new Error(message);
+          }
+
+          const nextOrderRaw = Array.isArray(parsed.section_order)
+            ? parsed.section_order
+            : detail.sectionOrder.filter((name) => name !== sectionNormalized);
+          const nextOrder = [];
+          const seen = new Set();
+          for (const name of nextOrderRaw) {
+            const normalized = normalizeSectionKey(name);
+            if (!normalized || seen.has(normalized)) continue;
+            seen.add(normalized);
+            nextOrder.push(normalized);
+          }
+          detail.sectionOrder = nextOrder;
+
+          delete detail.savedBySection[sectionNormalized];
+          delete detail.draftBySection[sectionNormalized];
+          delete detail.dirtyBySection[sectionNormalized];
+          if (detail.activeSection === sectionNormalized) {
+            detail.activeSection = detail.sectionOrder[0] || "";
+          }
+
+          const activeAgents = getActiveAgents();
+          const targetMeta = activeAgents.find(
+            (item) =>
+              item.user === agentMeta.user &&
+              (item.group || AGENT_GROUP_UNSORTED_ID) ===
+                (agentMeta.group || AGENT_GROUP_UNSORTED_ID) &&
+              item.agent_slug === agentMeta.agent_slug
+          );
+          if (targetMeta) {
+            targetMeta.section_order = [...detail.sectionOrder];
+          }
+
+          render();
+          setStatus(
+            `Deleted ${formatSectionLabel(sectionNormalized) || sectionNormalized} section from "${truncateStatusName(agentMeta.title)}"`
+          );
+        } catch (err) {
+          const message =
+            err instanceof Error ? err.message : "Section delete failed";
+          setStatus(message, true);
+        }
+      }
+
       function askChoiceDialog({
         title = "Confirm",
         message = "",
@@ -3954,30 +4392,40 @@
       function upsertFromDialog() {
         const name = dom.nameInput.value.trim();
         const description = dom.descriptionInput.value.trim();
-        const contextText = dom.contextInput.value;
         const selectedGroupId = dom.groupSelect.value || DEFAULT_GROUP_ID;
 
-        if (!name || !description || !contextText.trim()) {
-          setStatus("Name, description, and prompt text are required", true);
+        if (!name || !description) {
+          setStatus("Title and description are required", true);
           return;
         }
 
         const activeBlocks = getActiveBlocks();
-        const previousBlocks = cloneBlocks(activeBlocks);
         const newBlock = {
           id: generateId(),
           name,
           description,
-          contextText,
+          contextText: "",
           groupId: selectedGroupId,
           createdAt: nowIso(),
           updatedAt: nowIso(),
-          order: activeBlocks.length,
+          order: 0,
         };
 
-        activeBlocks.push(newBlock);
-        setActiveBlocks(activeBlocks);
-        setUndoSnapshot(previousBlocks, "Prompt removed");
+        const sameGroup = activeBlocks.filter((item) => item.groupId === selectedGroupId);
+        const otherGroups = activeBlocks.filter((item) => item.groupId !== selectedGroupId);
+        setActiveBlocks([newBlock, ...sameGroup, ...otherGroups]);
+        state.activeMode = "prompts";
+        setActiveGroupId(selectedGroupId);
+        saveActiveGroupsLocal();
+        state.searchByProfile[state.activeProfile] = "";
+        const promptUiMap = getPromptUiMap();
+        promptUiMap[newBlock.id] = {
+          isExpanded: true,
+          isDirty: false,
+          draftText: "",
+        };
+        state.pendingPromptEditorFocusId = newBlock.id;
+        syncSearchInputFromState();
         render();
         closeDialog();
         void persistWithStatus(`Added "${truncateStatusName(name)}"`);
@@ -3994,32 +4442,245 @@
         const previousBlocks = cloneBlocks(activeBlocks);
         setActiveBlocks(activeBlocks.filter((b) => b.id !== id));
 
-        setUndoSnapshot(
-          previousBlocks,
-          `Restored "${truncateStatusName(block.name)}"`
-        );
+        setUndoAction("prompts", {
+          kind: "prompt-blocks",
+          snapshot: cloneBlocks(previousBlocks),
+          message: `Restored "${truncateStatusName(block.name)}"`,
+          statusMessage: `Deleted "${truncateStatusName(block.name)}"`,
+        });
         render();
         void persistWithStatus(`Deleted "${truncateStatusName(block.name)}"`);
       }
 
       async function undoLastAction() {
-        if (!state.undoSnapshot) {
+        const undoAction = getUndoAction();
+        if (!undoAction) {
           setStatus("Nothing to undo");
           return;
         }
 
-        setActiveBlocks(cloneBlocks(state.undoSnapshot));
-        const undoResultMessage = state.undoStatusMessage || "Undid last action";
-
-        clearUndoSnapshot();
-        render();
-
-        try {
-          await saveToServer();
-          setStatus(undoResultMessage);
-        } catch (_err) {
-          setStatus("Autosave failed: Server may not be running", true);
+        if (state.activeMode === "prompts") {
+          if (undoAction.kind !== "prompt-blocks" || !Array.isArray(undoAction.snapshot)) {
+            setStatus("Nothing to undo");
+            return;
+          }
+          const previousBlocks = cloneBlocks(getActiveBlocks());
+          const restoredBlocks = cloneBlocks(undoAction.snapshot);
+          setActiveBlocks(restoredBlocks);
+          const promptUiMap = getPromptUiMap();
+          for (const restored of restoredBlocks) {
+            const existingUi = promptUiMap[restored.id] || {};
+            promptUiMap[restored.id] = {
+              ...existingUi,
+              draftText: restored.contextText,
+              isDirty: false,
+            };
+          }
+          try {
+            await saveToServer();
+            clearUndoAction("prompts");
+            render();
+            setStatus(undoAction.message || "Undid last prompt action");
+          } catch (_err) {
+            setActiveBlocks(previousBlocks);
+            render();
+            setStatus("Autosave failed: Server may not be running", true);
+          }
+          return;
         }
+
+        if (undoAction.kind === "agent-list") {
+          state.agentsByProfile[state.activeProfile] = cloneAgents(undoAction.snapshot || []);
+          if (Array.isArray(undoAction.expandedKeys)) {
+            state.expandedAgentKeyByProfile[state.activeProfile] = [...undoAction.expandedKeys];
+          }
+          if (undoAction.pendingFocus) {
+            state.pendingAgentEditorFocus = { ...undoAction.pendingFocus };
+          }
+          clearUndoAction("agents");
+          render();
+          setStatus(undoAction.message || "Undid last agent action");
+          return;
+        }
+
+        if (undoAction.kind === "agent-section-save") {
+          try {
+            const response = await fetch("/agents/section/save", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                user: undoAction.user,
+                group: undoAction.group,
+                agent: undoAction.agent,
+                section: undoAction.section,
+                content: undoAction.previousContent || "",
+              }),
+            });
+            if (!response.ok) throw new Error("Agent section undo failed");
+
+            const key = getAgentKey(undoAction.user, undoAction.group, undoAction.agent);
+            const detail = state.agentDetailsByKey[key] || null;
+            if (detail) {
+              detail.savedBySection[undoAction.section] = undoAction.previousContent || "";
+              detail.draftBySection[undoAction.section] = undoAction.previousContent || "";
+              detail.dirtyBySection[undoAction.section] = false;
+            }
+            clearUndoAction("agents");
+            render();
+            setStatus(undoAction.message || "Undid last agent edit");
+          } catch (_err) {
+            setStatus("Agent section undo failed: Server may not be running", true);
+          }
+          return;
+        }
+
+        if (undoAction.kind === "agent-meta-save") {
+          try {
+            const response = await fetch("/agents/meta/save", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                user: undoAction.user,
+                group: undoAction.group,
+                agent: undoAction.agent,
+                title: undoAction.previousTitle,
+                description: undoAction.previousDescription || "",
+              }),
+            });
+            if (!response.ok) throw new Error("Agent metadata undo failed");
+
+            const agents = getActiveAgents();
+            const target = agents.find(
+              (item) =>
+                item.user === undoAction.user &&
+                (item.group || AGENT_GROUP_UNSORTED_ID) === undoAction.group &&
+                item.agent_slug === undoAction.agent
+            );
+            if (target) {
+              target.title = undoAction.previousTitle;
+              target.description = undoAction.previousDescription || "";
+            }
+            clearUndoAction("agents");
+            render();
+            setStatus(undoAction.message || "Undid last agent edit");
+          } catch (_err) {
+            setStatus("Agent metadata undo failed: Server may not be running", true);
+          }
+          return;
+        }
+
+        if (undoAction.kind === "agent-delete") {
+          try {
+            const created = await fetch("/agents/create", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                user: undoAction.user,
+                group: undoAction.group,
+                agent: undoAction.agent,
+                title: undoAction.title,
+                description: undoAction.description || "",
+                section_order: Array.isArray(undoAction.sectionOrder)
+                  ? undoAction.sectionOrder
+                  : ["role"],
+              }),
+            });
+            const parsedCreated = await created.json().catch(() => ({}));
+            if (!created.ok) {
+              const message =
+                parsedCreated && typeof parsedCreated.error === "string"
+                  ? parsedCreated.error
+                  : "Agent recreate failed";
+              throw new Error(message);
+            }
+
+            const savedBySection = undoAction.savedBySection || {};
+            for (const sectionName of Object.keys(savedBySection)) {
+              const response = await fetch("/agents/section/save", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                  user: undoAction.user,
+                  group: undoAction.group,
+                  agent: undoAction.agent,
+                  section: sectionName,
+                  content: savedBySection[sectionName] || "",
+                }),
+              });
+              if (!response.ok) throw new Error("Agent section restore failed");
+            }
+
+            state.agentsByProfile[state.activeProfile] = cloneAgents(undoAction.snapshot || []);
+            const key = getAgentKey(undoAction.user, undoAction.group, undoAction.agent);
+            if (undoAction.detail) {
+              state.agentDetailsByKey[key] = cloneAgentDetail(undoAction.detail);
+            }
+            if (Array.isArray(undoAction.expandedKeys)) {
+              state.expandedAgentKeyByProfile[state.activeProfile] = [...undoAction.expandedKeys];
+            }
+            if (undoAction.pendingFocus) {
+              state.pendingAgentEditorFocus = { ...undoAction.pendingFocus };
+            }
+            clearUndoAction("agents");
+            render();
+            setStatus(undoAction.message || "Undid agent delete");
+          } catch (err) {
+            const message =
+              err instanceof Error ? err.message : "Agent undo failed";
+            setStatus(message, true);
+          }
+          return;
+        }
+
+        if (undoAction.kind === "agent-group-move") {
+          try {
+            const response = await fetch("/agents/move", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                user: undoAction.user,
+                from_group: undoAction.toGroup,
+                to_group: undoAction.fromGroup,
+                agent: undoAction.agent,
+              }),
+            });
+            const parsed = await response.json().catch(() => ({}));
+            if (!response.ok) {
+              const message =
+                parsed && typeof parsed.error === "string"
+                  ? parsed.error
+                  : "Agent move undo failed";
+              throw new Error(message);
+            }
+
+            if (
+              undoAction.nextKey &&
+              undoAction.previousKey &&
+              state.agentDetailsByKey[undoAction.nextKey]
+            ) {
+              state.agentDetailsByKey[undoAction.previousKey] =
+                state.agentDetailsByKey[undoAction.nextKey];
+              delete state.agentDetailsByKey[undoAction.nextKey];
+            }
+            state.agentsByProfile[state.activeProfile] = cloneAgents(undoAction.snapshot || []);
+            if (Array.isArray(undoAction.expandedKeys)) {
+              state.expandedAgentKeyByProfile[state.activeProfile] = [...undoAction.expandedKeys];
+            }
+            if (undoAction.pendingFocus) {
+              state.pendingAgentEditorFocus = { ...undoAction.pendingFocus };
+            }
+            clearUndoAction("agents");
+            render();
+            setStatus(undoAction.message || "Undid last agent move");
+          } catch (err) {
+            const message =
+              err instanceof Error ? err.message : "Agent move undo failed";
+            setStatus(message, true);
+          }
+          return;
+        }
+
+        setStatus("Nothing to undo");
       }
 
       function populateGroupSelect(selectedGroupId = "") {
@@ -4038,6 +4699,24 @@
           dom.groupSelect.appendChild(option);
         }
         dom.groupSelect.value = targetId;
+      }
+
+      function populateAgentGroupSelect(selectedGroupId = "") {
+        if (!dom.agentGroupSelect) return;
+        dom.agentGroupSelect.innerHTML = "";
+        const groups = getActiveAgentGroups();
+        const validIds = new Set(groups.map((group) => group.key));
+        let targetId = selectedGroupId || getActiveAgentGroupId();
+        if (!validIds.has(targetId)) {
+          targetId = AGENT_GROUP_UNSORTED_ID;
+        }
+        for (const group of groups) {
+          const option = document.createElement("option");
+          option.value = group.key;
+          option.textContent = group.label || group.key;
+          dom.agentGroupSelect.appendChild(option);
+        }
+        dom.agentGroupSelect.value = targetId;
       }
 
       function addGroup() {
@@ -4192,129 +4871,113 @@
         }
       }
 
-      function beginPromptGroupRename(groupTarget, groupNameElement) {
+      function beginPromptGroupRename(groupTarget, _groupNameElement) {
         if (!groupTarget || !groupTarget.id) return;
-        if (!(groupNameElement instanceof HTMLElement)) return;
         if (groupTarget.id === DEFAULT_GROUP_ID) {
           setStatus(`Cannot rename "${DEFAULT_GROUP_LABEL}"`, true);
           return;
         }
 
-        startInlineTextEdit(
-          groupNameElement,
-          groupTarget.name || "",
-          async (nextValueRaw, previousValueRaw) => {
-            const nextValue = String(nextValueRaw || "").trim();
-            const previousValue = String(previousValueRaw || "").trim();
-            if (!nextValue) {
-              groupNameElement.textContent = previousValue;
-              setStatus("Group name is required", true);
-              return;
-            }
-            if (nextValue.toLowerCase() === previousValue.toLowerCase()) {
-              groupNameElement.textContent = previousValue;
-              return;
-            }
+        const previousValue = String(groupTarget.name || "").trim();
+        const rawName = window.prompt("Rename prompt group:", previousValue);
+        if (rawName === null) return;
+        const nextValue = String(rawName || "").trim();
+        if (!nextValue) {
+          setStatus("Group name is required", true);
+          return;
+        }
+        if (nextValue.toLowerCase() === previousValue.toLowerCase()) return;
 
-            const groups = getActiveGroups();
-            const targetIndex = groups.findIndex((item) => item.id === groupTarget.id);
-            if (targetIndex < 0) return;
-            const duplicate = groups.some(
-              (item) =>
-                item.id !== groupTarget.id &&
-                String(item.name || "").trim().toLowerCase() === nextValue.toLowerCase()
-            );
-            if (duplicate) {
-              groupNameElement.textContent = previousValue;
-              setStatus("Group name already exists", true);
-              return;
-            }
-
-            const previousGroups = groups.map((item) => ({ ...item }));
-            const nextGroups = groups.map((item) =>
-              item.id === groupTarget.id ? { ...item, name: nextValue } : item
-            );
-            setActiveGroups(nextGroups);
-            render();
-            try {
-              await saveToServer();
-              setStatus(
-                `Renamed prompt group "${truncateStatusName(previousValue)}" to "${truncateStatusName(nextValue)}"`
-              );
-            } catch (_err) {
-              setActiveGroups(previousGroups);
-              render();
-              setStatus("Autosave failed: Server may not be running", true);
-            }
-          }
+        const groups = getActiveGroups();
+        const targetIndex = groups.findIndex((item) => item.id === groupTarget.id);
+        if (targetIndex < 0) return;
+        const duplicate = groups.some(
+          (item) =>
+            item.id !== groupTarget.id &&
+            String(item.name || "").trim().toLowerCase() === nextValue.toLowerCase()
         );
+        if (duplicate) {
+          setStatus("Group name already exists", true);
+          return;
+        }
+
+        const previousGroups = groups.map((item) => ({ ...item }));
+        const nextGroups = groups.map((item) =>
+          item.id === groupTarget.id ? { ...item, name: nextValue } : item
+        );
+        setActiveGroups(nextGroups);
+        render();
+        void (async () => {
+          try {
+            await saveToServer();
+            setStatus(
+              `Renamed prompt group "${truncateStatusName(previousValue)}" to "${truncateStatusName(nextValue)}"`
+            );
+          } catch (_err) {
+            setActiveGroups(previousGroups);
+            render();
+            setStatus("Autosave failed: Server may not be running", true);
+          }
+        })();
       }
 
-      async function beginAgentGroupRename(agentGroupTarget, groupNameElement) {
+      async function beginAgentGroupRename(agentGroupTarget, _groupNameElement) {
         if (!agentGroupTarget || !agentGroupTarget.key) return;
-        if (!(groupNameElement instanceof HTMLElement)) return;
         if (agentGroupTarget.key === AGENT_GROUP_UNSORTED_ID) {
           setStatus(`Cannot rename "${DEFAULT_GROUP_LABEL}"`, true);
           return;
         }
 
-        startInlineTextEdit(
-          groupNameElement,
-          agentGroupTarget.label || getAgentGroupLabel(agentGroupTarget.key),
-          async (nextValueRaw, previousValueRaw) => {
-            const nextValue = String(nextValueRaw || "").trim();
-            const previousValue = String(previousValueRaw || "").trim();
-            if (!nextValue) {
-              groupNameElement.textContent = previousValue;
-              setStatus("Agent group name is required", true);
-              return;
-            }
-            if (nextValue.toLowerCase() === previousValue.toLowerCase()) {
-              groupNameElement.textContent = previousValue;
-              return;
-            }
-            try {
-              const response = await fetch("/agents/groups/rename", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                  user: state.activeProfile,
-                  group: agentGroupTarget.key,
-                  label: nextValue,
-                }),
-              });
-              const parsed = await response.json().catch(() => ({}));
-              if (!response.ok) {
-                const message =
-                  parsed && typeof parsed.error === "string"
-                    ? parsed.error
-                    : "Agent group rename failed";
-                throw new Error(message);
-              }
-              const updatedRaw =
-                parsed && parsed.group
-                  ? parsed.group
-                  : { key: agentGroupTarget.key, label: nextValue };
-              const updated = normalizeAgentGroupMeta(updatedRaw);
-              if (updated) {
-                upsertActiveAgentGroupMeta(updated);
-              } else {
-                upsertActiveAgentGroupMeta({
-                  key: agentGroupTarget.key,
-                  label: nextValue,
-                });
-              }
-              render();
-              setStatus(
-                `Renamed agent group "${truncateStatusName(previousValue)}" to "${truncateStatusName(nextValue)}"`
-              );
-            } catch (err) {
-              groupNameElement.textContent = previousValue;
-              const message = err instanceof Error ? err.message : "Agent group rename failed";
-              setStatus(message, true);
-            }
+        const previousValue = String(
+          agentGroupTarget.label || getAgentGroupLabel(agentGroupTarget.key)
+        ).trim();
+        const rawName = window.prompt("Rename agent group:", previousValue);
+        if (rawName === null) return;
+        const nextValue = String(rawName || "").trim();
+        if (!nextValue) {
+          setStatus("Agent group name is required", true);
+          return;
+        }
+        if (nextValue.toLowerCase() === previousValue.toLowerCase()) return;
+        try {
+          const response = await fetch("/agents/groups/rename", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              user: state.activeProfile,
+              group: agentGroupTarget.key,
+              label: nextValue,
+            }),
+          });
+          const parsed = await response.json().catch(() => ({}));
+          if (!response.ok) {
+            const message =
+              parsed && typeof parsed.error === "string"
+                ? parsed.error
+                : "Agent group rename failed";
+            throw new Error(message);
           }
-        );
+          const updatedRaw =
+            parsed && parsed.group
+              ? parsed.group
+              : { key: agentGroupTarget.key, label: nextValue };
+          const updated = normalizeAgentGroupMeta(updatedRaw);
+          if (updated) {
+            upsertActiveAgentGroupMeta(updated);
+          } else {
+            upsertActiveAgentGroupMeta({
+              key: agentGroupTarget.key,
+              label: nextValue,
+            });
+          }
+          render();
+          setStatus(
+            `Renamed agent group "${truncateStatusName(previousValue)}" to "${truncateStatusName(nextValue)}"`
+          );
+        } catch (err) {
+          const message = err instanceof Error ? err.message : "Agent group rename failed";
+          setStatus(message, true);
+        }
       }
 
       async function deletePromptGroup(groupTarget) {
@@ -4395,6 +5058,19 @@
         }
       }
 
+      function handleAgentTabContextAction(actionName) {
+        const target = state.agentTabContextTarget;
+        closeAgentTabContextMenu();
+        if (!target) return;
+        if (actionName === "rename" && typeof target.rename === "function") {
+          target.rename();
+          return;
+        }
+        if (actionName === "delete" && typeof target.remove === "function") {
+          target.remove();
+        }
+      }
+
       function escapeHtml(value) {
         return String(value)
           .replaceAll("&", "&amp;")
@@ -4443,6 +5119,12 @@
         dom.cardContextEditDescriptionBtn.addEventListener("click", () => {
           handleCardContextAction("description");
         });
+        dom.agentTabRenameBtn.addEventListener("click", () => {
+          handleAgentTabContextAction("rename");
+        });
+        dom.agentTabDeleteBtn.addEventListener("click", () => {
+          handleAgentTabContextAction("delete");
+        });
         document.addEventListener("click", (event) => {
           if (!(event.target instanceof Element)) {
             closeAllContextMenus();
@@ -4450,6 +5132,7 @@
           }
           if (!dom.groupContextMenu.contains(event.target)) closeGroupContextMenu();
           if (!dom.cardContextMenu.contains(event.target)) closeCardContextMenu();
+          if (!dom.agentTabContextMenu.contains(event.target)) closeAgentTabContextMenu();
         });
         document.addEventListener("contextmenu", (event) => {
           if (!(event.target instanceof Element)) {
@@ -4461,6 +5144,9 @@
           }
           if (!event.target.closest('.block-card[data-has-card-context="true"]')) {
             closeCardContextMenu();
+          }
+          if (!event.target.closest('.agent-tab-btn[data-has-agent-tab-context="true"]')) {
+            closeAgentTabContextMenu();
           }
         });
         window.addEventListener("resize", closeAllContextMenus);
