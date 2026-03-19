@@ -728,8 +728,8 @@
   <header class="app-header">
     <div class="header-spacer" aria-hidden="true"></div>
     <div class="header-title-wrap">
-      <h1 class="header-title">Prompt Library</h1>
-      <p class="header-subtitle">Manages your favorite LLM session directives</p>
+      <h1 class="header-title">LLM Prompt and Agent Library</h1>
+      <p class="header-subtitle">Organized store of reusable prompts and agent building blocks</p>
     </div>
     <div class="header-actions">
       <label class="user-select-label" for="userSelect">Active user</label>
@@ -739,7 +739,7 @@
 
   <div class="status">
     <div class="status-description">
-      Allows you to save and retrieve reusable prompt blocks for quick paste into LLM sessions in order to establish a consistent session setup
+      Allows you to save, organize, edit, and quickly reuse prompts and structured agent components so you can keep context consistent across LLM sessions
     </div>
   </div>
 
@@ -839,6 +839,7 @@
   </dialog>
 
   <div id="groupContextMenu" class="group-context-menu" hidden>
+    <button id="groupContextEditNameBtn" type="button">Edit Name</button>
     <button id="groupContextDeleteBtn" type="button">Delete</button>
   </div>
 
@@ -887,6 +888,7 @@
         agentNameInput: document.getElementById("agentNameInput"),
         btnCancelAgentCreate: document.getElementById("btnCancelAgentCreate"),
         groupContextMenu: document.getElementById("groupContextMenu"),
+        groupContextEditNameBtn: document.getElementById("groupContextEditNameBtn"),
         groupContextDeleteBtn: document.getElementById("groupContextDeleteBtn"),
         cardContextMenu: document.getElementById("cardContextMenu"),
         cardContextEditNameBtn: document.getElementById("cardContextEditNameBtn"),
@@ -1727,6 +1729,14 @@
         return getActiveModeSearchTerm();
       }
 
+      function isPromptSearchActive() {
+        return !!String(state.searchByProfile[state.activeProfile] || "").trim();
+      }
+
+      function isAgentSearchActive() {
+        return !!String(state.agentSearchByProfile[state.activeProfile] || "").trim();
+      }
+
       function syncSearchInputFromState() {
         dom.searchInput.value = getActiveModeSearchTerm();
         dom.searchInput.placeholder =
@@ -1735,14 +1745,12 @@
 
       function getVisibleBlocks() {
         const allBlocks = getActiveBlocks();
-        const selectedGroupId = getActiveGroupId();
         const query = (state.searchByProfile[state.activeProfile] || "")
           .trim()
           .toLowerCase();
 
         return allBlocks.filter((block) => {
-          const inGroup = block.groupId === selectedGroupId;
-          if (!inGroup) return false;
+          if (!query && block.groupId !== getActiveGroupId()) return false;
           if (!query) return true;
           return (
             block.name.toLowerCase().includes(query) ||
@@ -1754,20 +1762,18 @@
 
       function getVisibleAgents() {
         const allAgents = getActiveAgents();
-        const selectedGroup = getActiveAgentGroupId();
         const query = (state.agentSearchByProfile[state.activeProfile] || "")
           .trim()
           .toLowerCase();
 
         return allAgents.filter((agent) => {
           const normalizedGroup = agent.group || AGENT_GROUP_UNSORTED_ID;
-          const inGroup = normalizedGroup === selectedGroup;
-          if (!inGroup) return false;
+          if (!query && normalizedGroup !== getActiveAgentGroupId()) return false;
           if (!query) return true;
           return (
             agent.title.toLowerCase().includes(query) ||
             (agent.description || "").toLowerCase().includes(query) ||
-            normalizedGroup.toLowerCase().includes(query)
+            getAgentGroupLabel(normalizedGroup).toLowerCase().includes(query)
           );
         });
       }
@@ -1776,16 +1782,24 @@
         if (state.activeMode === "agents") {
           const visibleCount = getVisibleAgents().length;
           const itemLabel = visibleCount === 1 ? "1 agent" : `${visibleCount} agents`;
-          const searchLabel = getActiveSearchTerm().trim() ? " - filtered" : "";
+          if (isAgentSearchActive()) {
+            dom.countLabel.textContent =
+              `${itemLabel} matching search across all agent groups (${getActiveProfileLabel()})`;
+            return;
+          }
           dom.countLabel.textContent =
-            `${itemLabel} in ${getActiveAgentGroupLabel()} (${getActiveProfileLabel()})${searchLabel}`;
+            `${itemLabel} in ${getActiveAgentGroupLabel()} (${getActiveProfileLabel()})`;
           return;
         }
         const visibleCount = getVisibleBlocks().length;
         const itemLabel = visibleCount === 1 ? "1 prompt" : `${visibleCount} prompts`;
-        const searchLabel = getActiveSearchTerm().trim() ? " - filtered" : "";
+        if (isPromptSearchActive()) {
+          dom.countLabel.textContent =
+            `${itemLabel} matching search across all prompt groups (${getActiveProfileLabel()})`;
+          return;
+        }
         dom.countLabel.textContent =
-          `${itemLabel} in ${getActiveGroupLabel()} (${getActiveProfileLabel()})${searchLabel}`;
+          `${itemLabel} in ${getActiveGroupLabel()} (${getActiveProfileLabel()})`;
       }
 
       function renderGroups() {
@@ -1809,11 +1823,14 @@
           button.type = "button";
           button.className =
             "group-item" +
-            (state.activeMode === "prompts" && getActiveGroupId() === group.id
+            (state.activeMode === "prompts" &&
+            !isPromptSearchActive() &&
+            getActiveGroupId() === group.id
               ? " active"
               : "");
           button.innerHTML =
             `<span class="group-name">${escapeHtml(group.name)}</span><span class="group-count">${groupCount}</span>`;
+          const groupNameEl = button.querySelector(".group-name");
           button.addEventListener("click", () => {
             void (async () => {
             if (state.activeMode === "agents") {
@@ -1822,6 +1839,7 @@
             }
             state.activeMode = "prompts";
             setActiveGroupId(group.id);
+            state.searchByProfile[state.activeProfile] = "";
             saveActiveGroupsLocal();
             syncSearchInputFromState();
             render();
@@ -1836,7 +1854,12 @@
             groupType: "prompt",
             groupId: group.id,
             label: group.name,
+            renameable: group.id !== DEFAULT_GROUP_ID,
             deletable: group.id !== DEFAULT_GROUP_ID,
+            editName: () => {
+              if (!(groupNameEl instanceof HTMLElement)) return;
+              beginPromptGroupRename(group, groupNameEl);
+            },
           });
           dom.groupsContainer.appendChild(button);
         }
@@ -1853,11 +1876,13 @@
           button.className =
             "group-item" +
             (state.activeMode === "agents" &&
+            !isAgentSearchActive() &&
             getActiveAgentGroupId() === agentGroup.key
               ? " active"
               : "");
           button.innerHTML =
             `<span class="group-name">${escapeHtml(agentGroup.label || agentGroup.key)}</span><span class="group-count">${agentGroup.count}</span>`;
+          const groupNameEl = button.querySelector(".group-name");
           button.addEventListener("click", () => {
             void (async () => {
             if (
@@ -1869,6 +1894,7 @@
             }
             state.activeMode = "agents";
             setActiveAgentGroupId(agentGroup.key);
+            state.agentSearchByProfile[state.activeProfile] = "";
             saveActiveAgentGroupsLocal();
             syncSearchInputFromState();
             render();
@@ -1885,7 +1911,12 @@
             groupType: "agent",
             groupId: agentGroup.key,
             label: agentGroup.label || getAgentGroupLabel(agentGroup.key),
+            renameable: agentGroup.key !== AGENT_GROUP_UNSORTED_ID,
             deletable: agentGroup.key !== AGENT_GROUP_UNSORTED_ID,
+            editName: () => {
+              if (!(groupNameEl instanceof HTMLElement)) return;
+              void beginAgentGroupRename(agentGroup, groupNameEl);
+            },
           });
           dom.groupsContainer.appendChild(button);
         }
@@ -1981,6 +2012,7 @@
         closeCardContextMenu();
         state.contextMenuTarget = target;
         const menu = dom.groupContextMenu;
+        dom.groupContextEditNameBtn.disabled = !target.renameable;
         dom.groupContextDeleteBtn.disabled = !target.deletable;
         menu.hidden = false;
         const viewportWidth = window.innerWidth;
@@ -2412,7 +2444,7 @@
         }
 
         function syncCardDraggable() {
-          card.draggable = true;
+          card.draggable = !isPromptSearchActive();
         }
 
         function applyExpandedVisual(isOpen) {
@@ -2480,6 +2512,10 @@
         deleteBtn.addEventListener("click", () => deleteBlock(block.id));
 
         card.addEventListener("dragstart", (event) => {
+          if (isPromptSearchActive()) {
+            event.preventDefault();
+            return;
+          }
           if (
             event.target &&
             (event.target.closest("button") ||
@@ -2570,7 +2606,7 @@
         card.className = "block-card";
         card.dataset.agentKey = agentKey;
         card.dataset.hasCardContext = "true";
-        card.draggable = true;
+        card.draggable = !isAgentSearchActive();
 
         const header = document.createElement("div");
         header.className = "block-header";
@@ -2974,6 +3010,10 @@
         });
 
         card.addEventListener("dragstart", (event) => {
+          if (isAgentSearchActive()) {
+            event.preventDefault();
+            return;
+          }
           if (
             event.target &&
             (event.target.closest("button") ||
@@ -3265,9 +3305,9 @@
           if (!visibleAgents.length) {
             const empty = document.createElement("div");
             empty.className = "empty-state";
-            if (getActiveSearchTerm().trim()) {
+            if (isAgentSearchActive()) {
               empty.textContent =
-                `No agents match "${getActiveSearchTerm().trim()}" in ${getActiveAgentGroupLabel()}.`;
+                `No agents match "${getActiveSearchTerm().trim()}" across all agent groups.`;
             } else {
               empty.textContent = `No agents yet in ${getActiveAgentGroupLabel()}.`;
             }
@@ -3285,9 +3325,9 @@
         if (!activeBlocks.length) {
           const empty = document.createElement("div");
           empty.className = "empty-state";
-          if (getActiveSearchTerm().trim()) {
+          if (isPromptSearchActive()) {
             empty.textContent =
-              `No prompts match "${getActiveSearchTerm().trim()}" in ${getActiveGroupLabel()}.`;
+              `No prompts match "${getActiveSearchTerm().trim()}" across all prompt groups.`;
           } else {
             empty.textContent =
               `No prompts yet in ${getActiveGroupLabel()}. Use + New Prompt to create one.`;
@@ -4151,6 +4191,131 @@
         }
       }
 
+      function beginPromptGroupRename(groupTarget, groupNameElement) {
+        if (!groupTarget || !groupTarget.id) return;
+        if (!(groupNameElement instanceof HTMLElement)) return;
+        if (groupTarget.id === DEFAULT_GROUP_ID) {
+          setStatus('Cannot rename "No Group"', true);
+          return;
+        }
+
+        startInlineTextEdit(
+          groupNameElement,
+          groupTarget.name || "",
+          async (nextValueRaw, previousValueRaw) => {
+            const nextValue = String(nextValueRaw || "").trim();
+            const previousValue = String(previousValueRaw || "").trim();
+            if (!nextValue) {
+              groupNameElement.textContent = previousValue;
+              setStatus("Group name is required", true);
+              return;
+            }
+            if (nextValue.toLowerCase() === previousValue.toLowerCase()) {
+              groupNameElement.textContent = previousValue;
+              return;
+            }
+
+            const groups = getActiveGroups();
+            const targetIndex = groups.findIndex((item) => item.id === groupTarget.id);
+            if (targetIndex < 0) return;
+            const duplicate = groups.some(
+              (item) =>
+                item.id !== groupTarget.id &&
+                String(item.name || "").trim().toLowerCase() === nextValue.toLowerCase()
+            );
+            if (duplicate) {
+              groupNameElement.textContent = previousValue;
+              setStatus("Group name already exists", true);
+              return;
+            }
+
+            const previousGroups = groups.map((item) => ({ ...item }));
+            const nextGroups = groups.map((item) =>
+              item.id === groupTarget.id ? { ...item, name: nextValue } : item
+            );
+            setActiveGroups(nextGroups);
+            render();
+            try {
+              await saveToServer();
+              setStatus(
+                `Renamed prompt group "${truncateStatusName(previousValue)}" to "${truncateStatusName(nextValue)}"`
+              );
+            } catch (_err) {
+              setActiveGroups(previousGroups);
+              render();
+              setStatus("Autosave failed: Server may not be running", true);
+            }
+          }
+        );
+      }
+
+      async function beginAgentGroupRename(agentGroupTarget, groupNameElement) {
+        if (!agentGroupTarget || !agentGroupTarget.key) return;
+        if (!(groupNameElement instanceof HTMLElement)) return;
+        if (agentGroupTarget.key === AGENT_GROUP_UNSORTED_ID) {
+          setStatus('Cannot rename "No Group"', true);
+          return;
+        }
+
+        startInlineTextEdit(
+          groupNameElement,
+          agentGroupTarget.label || getAgentGroupLabel(agentGroupTarget.key),
+          async (nextValueRaw, previousValueRaw) => {
+            const nextValue = String(nextValueRaw || "").trim();
+            const previousValue = String(previousValueRaw || "").trim();
+            if (!nextValue) {
+              groupNameElement.textContent = previousValue;
+              setStatus("Agent group name is required", true);
+              return;
+            }
+            if (nextValue.toLowerCase() === previousValue.toLowerCase()) {
+              groupNameElement.textContent = previousValue;
+              return;
+            }
+            try {
+              const response = await fetch("/agents/groups/rename", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                  user: state.activeProfile,
+                  group: agentGroupTarget.key,
+                  label: nextValue,
+                }),
+              });
+              const parsed = await response.json().catch(() => ({}));
+              if (!response.ok) {
+                const message =
+                  parsed && typeof parsed.error === "string"
+                    ? parsed.error
+                    : "Agent group rename failed";
+                throw new Error(message);
+              }
+              const updatedRaw =
+                parsed && parsed.group
+                  ? parsed.group
+                  : { key: agentGroupTarget.key, label: nextValue };
+              const updated = normalizeAgentGroupMeta(updatedRaw);
+              if (updated) {
+                upsertActiveAgentGroupMeta(updated);
+              } else {
+                upsertActiveAgentGroupMeta({
+                  key: agentGroupTarget.key,
+                  label: nextValue,
+                });
+              }
+              render();
+              setStatus(
+                `Renamed agent group "${truncateStatusName(previousValue)}" to "${truncateStatusName(nextValue)}"`
+              );
+            } catch (err) {
+              groupNameElement.textContent = previousValue;
+              const message = err instanceof Error ? err.message : "Agent group rename failed";
+              setStatus(message, true);
+            }
+          }
+        );
+      }
+
       async function deletePromptGroup(groupTarget) {
         if (!groupTarget || !groupTarget.groupId) return;
         if (groupTarget.groupId === DEFAULT_GROUP_ID) {
@@ -4207,6 +4372,15 @@
         }
       }
 
+      function handleGroupContextEditName() {
+        const target = state.contextMenuTarget;
+        closeGroupContextMenu();
+        if (!target || !target.renameable) return;
+        if (typeof target.editName === "function") {
+          target.editName();
+        }
+      }
+
       function handleCardContextAction(actionName) {
         const target = state.cardContextTarget;
         closeCardContextMenu();
@@ -4255,6 +4429,9 @@
         });
         dom.btnUndoStatus.addEventListener("click", () => {
           void undoLastAction();
+        });
+        dom.groupContextEditNameBtn.addEventListener("click", () => {
+          handleGroupContextEditName();
         });
         dom.groupContextDeleteBtn.addEventListener("click", () => {
           void handleGroupContextDelete();

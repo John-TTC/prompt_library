@@ -196,6 +196,30 @@ def delete_agent_group():
     return jsonify(result)
 
 
+@app.route("/agents/groups/rename", methods=["POST"])
+def rename_agent_group():
+    payload = request.get_json(force=True) or {}
+    user = str(payload.get("user", "")).strip()
+    group = str(payload.get("group", "")).strip()
+    label = str(payload.get("label", "")).strip()
+    if not user or not group:
+        return jsonify({"error": "Missing user/group"}), 400
+    if not label:
+        return jsonify({"error": "Missing label"}), 400
+    try:
+        result = agent_service.rename_agent_group(
+            AGENTS_ROOT,
+            user=user,
+            group=group,
+            label=label,
+        )
+    except ValueError as err:
+        return jsonify({"error": str(err)}), 400
+    except FileNotFoundError as err:
+        return jsonify({"error": str(err)}), 404
+    return jsonify(result)
+
+
 @app.route("/agents/load", methods=["GET"])
 def load_agent():
     user = request.args.get("user", "").strip()

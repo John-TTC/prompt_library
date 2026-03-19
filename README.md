@@ -1,86 +1,120 @@
-# Prompt Library
+# LLM Prompt and Agent Library
 
-Self-hosted Prompt + Agent workbench for organizing and reusing LLM prompts.
+A lightweight, local-first workspace for organizing, editing, and reusing prompts and structured agent components across LLM sessions.
 
-## Current App State (Implemented)
+This app helps you keep your favorite prompt building blocks in one place so you can quickly retrieve, edit, copy, and assemble them without relying on cloud storage or heavyweight tooling.
 
-The project is currently a hybrid local app with:
+## What this is
 
-- Prompt management in the UI, stored in JSON (`data_file`)
-- Agent management in the UI, stored on filesystem folders under `agents/`
-- User-scoped views from `launch-config.ini` (`users=...`)
+**LLM Prompt and Agent Library** is a self-hosted Flask web app for managing two kinds of reusable LLM assets:
 
-### Stage progress (current)
+- **Prompts** — single reusable text blocks stored in JSON
+- **Agents** — structured multi-section prompt definitions stored as Markdown files in folders on disk
 
-- Stage 1: Prompt terminology updates (done)
-- Stage 2: Inline prompt text editing with dirty save/cancel/copy flows (done)
-- Stage 3: Backend agent filesystem service + Flask routes (done)
-- Stage 4: First visible agent UI layer (done)
-- Stage 5: Agent construct behavior (done)
-- Stage 5.1: Agent creation + section add flow + agent groups (done)
-- Stage 5.2: Prompt/Agent group parity (create, reorder, context-menu delete) (done)
-- Stage 5.3: No Group model + scroll/resize polish (done)
-- Stage 7: Saved-state character/token counts (done)
+It is designed to stay:
 
-### Prompt features currently available
+- lightweight
+- local-first
+- fast to use
+- clipboard-oriented
+- easy to understand
+- visually simple
 
-- Prompt groups per user with `No Group` pinned first
-- Prompt groups use `No Group` as the built-in default (pinned first)
-- Prompt groups are filtered by selected real group (no synthetic `All Prompts` row)
-- Prompt group creation from `+ Group`
-- Prompt group drag-reorder (Prompt groups only)
-- Prompt group delete via right-click context menu (moves prompts to `No Group`)
-- Search/filter by prompt group
+This is **not** a full autonomous agent runner. It is a **prompt and agent authoring / construction workspace**.
+
+---
+
+## Core concepts
+
+### Prompts
+
+A **Prompt** is a single reusable block of text.
+
+Prompts are useful for:
+- reusable system prompts
+- role instructions
+- style guides
+- boilerplate task setup
+- frequently reused context blocks
+
+Prompts are stored in the JSON file configured by `data_file` in `launch-config.ini`.
+
+### Agents
+
+An **Agent** is a structured prompt made up of multiple named sections.
+
+Typical sections might include:
+- `Role`
+- `Rules`
+- `Process`
+- `Output`
+
+Agents are useful when you want a reusable prompt template that is split into logical parts and can be assembled into:
+- a **full agent prompt**
+- a **single section prompt**
+
+Agents are stored on disk as folders containing Markdown files.
+
+---
+
+## Features
+
+### Prompt features
+
+- Create, view, edit, and delete prompts
+- Organize prompts into groups
+- Drag and drop prompts between groups
+- Reorder prompts
 - Expand/collapse prompt cards
-- Inline prompt text editing in expanded cards
-- Prompt card right-click menu for inline name/description edits (save on Enter or blur)
-- Prompt card quick action text updated to `Copy to Clipboard`
-- Dirty-state save/cancel/copy confirmation behavior
-- Prompt delete
-- Prompt reorder (collapsed cards)
-- Prompt reorder (collapsed and expanded cards)
-- Drag/drop move prompts between groups
+- Inline editing with save/cancel flow
+- Copy prompt text to clipboard
+- Dirty-state protection for copy/cancel flows
+- Prompt metadata editing from the UI
+- Saved-state character and estimated token counts
 
-### Agent features currently available
+### Agent features
 
-- Agent navigation/filter presence in left nav
-- Agent list rendering by active user/group
-- Agent group creation in Agent mode (`+ Group`)
-- Agent groups use `No Group` as the built-in default (pinned first)
-- Agent groups are filtered by selected real group (no synthetic `All Agents` row)
-- Agent group drag-reorder (Agent groups only)
-- Agent group delete via right-click context menu (moves agents to `No Group`)
-- Agent groups persisted as metadata + real folders (including empty groups)
-- Agent drag/drop assignment to Agent groups in sidebar
+- Create agents from the UI
+- Store agents as portable filesystem folders
+- Organize agents into groups
+- Drag and drop agents between groups
+- Reorder agents
 - Expand/collapse agent cards
-- Multiple agent cards can remain expanded at once
-- Agent card reorder (collapsed and expanded)
-- Add Agent dialog with disk-backed creation in selected group (`No Group` fallback)
-- Load existing agent sections from backend
-- Section tab switching
-- Edit/save/cancel existing section content
-- Add new section via `+` tab with Enter/Escape name flow and uniqueness checks
-- Agent card right-click menu for inline name/description edits (save on Enter or blur)
-- Dirty-edit discard confirmations on key navigation paths
-- Agent delete with confirmation
-- Construct Agent Prompt + Construct Section Prompt
-- Construct preview dialog with copy flow and post-copy confirmation
-- Dirty-state construct decision flow:
-  - Save and Construct
-  - Construct Without Saving
-  - Cancel
+- Keep multiple agent cards expanded at once
+- Edit agent sections inline
+- Add new sections/tabs from the UI
+- Construct a full agent prompt from all sections
+- Construct a prompt from only the active section
+- Construct preview/copy dialog flow
+- Dirty-state protection for save/cancel/construct flows
+- Agent metadata editing from the UI
+- Saved-state character and estimated token counts
 
-### Agent features intentionally deferred
+### Group features
 
-- Agent zip export (Stage 6)
-- Agent section rename/reorder/deletion UX
-- Agent group rename UX
+- Separate group systems for Prompts and Agents
+- Create groups from the UI
+- Reorder groups
+- Delete groups from a context menu
+- On delete, move contained items to **No Group**
 
-## Architecture Notes
+---
 
-- Flask + server-rendered HTML (no frontend framework)
-- Prompt data remains JSON-backed
-- Agent data remains filesystem-backed:
+## Storage model
+
+### Prompt storage
+
+Prompts remain JSON-backed.
+
+Configured by:
+
+- `data_file` in `launch-config.ini`
+
+### Agent storage
+
+Agents are filesystem-backed and scoped by user.
+
+Typical structure:
 
 ```text
 agents/<user>/<group>/<agent>/
@@ -89,30 +123,72 @@ agents/<user>/<group>/<agent>/
   rules.md
   process.md
   output.md
-
-agents/<user>/agent-groups.json
-  # persisted Agent-group metadata: key, label, order, optional createdAt
 ```
 
-UI notes:
-- The page now handles normal vertical scrolling for long Prompt/Agent lists.
-- Expanded Prompt/Agent cards are not capped by a fixed viewport max-height.
+Agent groups are also persisted on disk per user.
 
-Section keys are canonically handled as lowercase names (e.g. `role`, `rules`) with compatibility for legacy values like `role.md`.
+Example:
 
-## Features
+```text
+agents/<user>/agent-groups.json
+```
 
-- Fast local web UI for prompts and agents
-- JSON-backed prompt storage (`data_file` configurable)
-- Filesystem-backed agent storage (`agents_root` optional)
-- Simple local launcher config via `launch-config.ini`
-- Works for localhost or LAN access
-- Windows launcher script included (`start-prompt-library.vbs`)
+This keeps agents portable and easy to inspect, back up, or move manually.
+
+---
+
+## UI overview
+
+The app is split into two modes:
+
+* **Prompts**
+* **Agents**
+
+You can switch between modes in the UI and work with each independently.
+
+### Left navigation
+
+The left sidebar shows groups for the current mode.
+
+Prompts and Agents have separate group lists.
+
+### Main pane
+
+The main pane displays prompt cards or agent cards for the selected group.
+
+The page uses normal browser scrolling, so long lists can extend naturally down the page.
+
+### Editing behavior
+
+Expanded cards support inline editing with explicit save/cancel flows.
+
+Counts shown in headers are based on the **last saved state**, not live unsaved edits.
+
+---
+
+## Character and token counts
+
+The app displays saved-state counts in the UI for clarity and low overhead.
+
+Displayed counts include:
+
+* Prompt header counts
+* Agent total counts
+* Active section/tab counts
+
+Rules:
+
+* **Character count** = exact string length
+* **Token estimate** = approximate `chars / 4`
+
+These counts update **only when content is saved**.
+
+---
 
 ## Requirements
 
-- Python 3.x
-- Flask
+* Python 3.x
+* Flask
 
 Install Flask:
 
@@ -120,16 +196,34 @@ Install Flask:
 pip install flask
 ```
 
-Optional (recommended): use a virtual environment instead of global install.
+Using a virtual environment is recommended, but not required.
 
-## Quick Start (Windows)
+---
+
+## Quick start
+
+### Windows
 
 1. Copy `launch-config.example.ini` to `launch-config.ini`
 2. Edit `launch-config.ini` for your machine
-3. Start the app:
-   - Double-click `start-prompt-library.vbs`
-   - or run `python server.py`
-4. Open the URL from your config (example: `http://127.0.0.1:5000`)
+3. Start the app by either:
+
+   * double-clicking `start-prompt-library.vbs`
+   * or running:
+
+```powershell
+python server.py
+```
+
+4. Open the configured URL in your browser
+
+Example:
+
+```text
+http://127.0.0.1:5000
+```
+
+---
 
 ## Configuration
 
@@ -144,42 +238,88 @@ agents_root=agents
 users=User One,User Two
 ```
 
-Both launch methods (`start-prompt-library.vbs` and `python server.py`) use `launch-config.ini`.
+Both `start-prompt-library.vbs` and `python server.py` use this file.
 
 ### Config keys
 
-- `listen_port`: port to listen on/open (default `5000`)
-- `open_scheme`: URL scheme (`http` by default)
-- `open_host`: host/IP to open in browser (`127.0.0.1` for local, LAN IP for intranet)
-- `data_file`: JSON file used by `server.py` (relative filename or absolute path)
-- `agents_root`: optional filesystem root for agent folders (defaults to `agents`)
-- `users`: comma-separated user names shown in the app user dropdown
+* `listen_port` — port the app listens on
+* `open_scheme` — usually `http`
+* `open_host` — host/IP to open in the browser
+* `data_file` — prompt JSON storage file
+* `agents_root` — root folder for agent storage
+* `users` — comma-separated list of users shown in the app
 
-## Local Network Access
+---
 
-`server.py` runs on `0.0.0.0`, so other devices on your LAN can connect if:
+## Local network access
 
-- they can reach your machine's LAN IP
-- your firewall allows inbound traffic on `listen_port`
+`server.py` runs on `0.0.0.0`, so other devices on your LAN can access it if:
 
-Example LAN setting:
+* they can reach your machine’s LAN IP
+* your firewall allows inbound traffic on the configured port
+
+Example:
 
 ```ini
 open_host=192.168.x.x
 ```
 
-## Files
+---
 
-- `server.py` - Flask server and data API
-- `agent_service.py` - filesystem-backed agent storage service
-- `templates/prompt_library.html` - main UI
-- `start-prompt-library.vbs` - Windows launcher
-- `stop-server-5000.vbs` - helper to stop port 5000 listener
-- `launch-config.example.ini` - public-safe sample config
+## Project files
 
-## GitHub / Local Data Notes
+* `server.py` — Flask server and app routes
+* `agent_service.py` — filesystem-backed agent storage/service layer
+* `templates/prompt_library.html` — main UI template
+* `start-prompt-library.vbs` — Windows launcher
+* `stop-server-5000.vbs` — helper for stopping a process on port 5000
+* `launch-config.example.ini` — sample config
 
-- `launch-config.ini` ignored by git, so machine-specific settings stay local and are not included in the repo.
-- JSON data files are ignored by git by default, so prompt content stays local and is not included in the repo.
-- Ignored JSON filenames include `contexts.json` and `prompt_library.json`.
+---
+
+## Design goals
+
+This app is intentionally opinionated:
+
+* **local-first** — your data stays on your machine
+* **simple** — no heavy frontend framework
+* **fast** — optimized for practical prompt reuse, not complex orchestration
+* **portable** — agent definitions live as ordinary files/folders
+* **incremental** — designed to evolve without becoming bloated
+
+---
+
+## Current limitations / planned improvements
+
+The app already supports prompt and agent authoring well, but some features may still be expanded over time.
+
+Examples of future work may include:
+
+* agent zip export
+* agent section rename/delete/reorder UX
+* agent group rename UX
+* additional polish around transport/import workflows
+
+---
+
+## Git / local data notes
+
+* `launch-config.ini` should remain git-ignored so machine-specific settings stay local
+* prompt data files can remain git-ignored so your prompt content stays private
+* agent content folders may also be kept local/private unless you intentionally choose to version them
+
+---
+
+## Summary
+
+**LLM Prompt and Agent Library** is a fast local workbench for managing reusable prompts and structured agent components.
+
+It gives you:
+
+* JSON-backed prompts
+* filesystem-backed agents
+* explicit save/cancel workflows
+* copy/construct flows
+* organized group-based navigation
+* local ownership of your prompt assets
 

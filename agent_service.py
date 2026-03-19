@@ -412,6 +412,34 @@ def reorder_agent_groups(agents_root, user, ordered_group_keys):
     return {"ok": True, "groups": saved}
 
 
+def rename_agent_group(agents_root, user, group, label):
+    root = Path(agents_root)
+    user_root, _ = _user_root(root, user)
+    group_norm = _normalize_group_name(group)
+    if group_norm == DEFAULT_AGENT_GROUP:
+        raise ValueError('Cannot rename "No Group"')
+
+    next_label = str(label).strip()
+    if not next_label:
+        raise ValueError("Group name is required")
+
+    groups = _sync_agent_groups(root, user)
+    target = next((item for item in groups if item["key"] == group_norm), None)
+    if not target:
+        raise FileNotFoundError("Group not found")
+
+    for item in groups:
+        if item["key"] == group_norm:
+            continue
+        if str(item.get("label", "")).strip().lower() == next_label.lower():
+            raise ValueError("Group name already exists")
+
+    target["label"] = _normalize_group_label(next_label, group_norm)
+    saved = _save_group_registry(user_root, groups)
+    updated = next((item for item in saved if item["key"] == group_norm), None)
+    return {"ok": True, "group": updated or target}
+
+
 def load_agent(agents_root, user, group, agent_slug):
     root = Path(agents_root)
     agent_dir, user_norm, group_norm, agent_norm = _agent_dir(
