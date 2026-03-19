@@ -841,6 +841,20 @@
     </form>
   </dialog>
 
+  <dialog id="textInputDialog">
+    <form id="textInputForm" method="dialog" class="dialog-content">
+      <h2 id="textInputTitle" class="dialog-title">Rename</h2>
+      <label>
+        <span id="textInputLabel">Name</span>
+        <input id="textInputValue" name="textInputValue" maxlength="120" required />
+      </label>
+      <div class="dialog-actions">
+        <button type="button" id="textInputCancelBtn">Cancel</button>
+        <button type="submit" id="textInputSubmitBtn" class="btn-primary">Save</button>
+      </div>
+    </form>
+  </dialog>
+
   <div id="groupContextMenu" class="group-context-menu" hidden>
     <button id="groupContextEditNameBtn" type="button">Rename</button>
     <button id="groupContextDeleteBtn" type="button">Delete</button>
@@ -896,6 +910,13 @@
         agentDescriptionInput: document.getElementById("agentDescriptionInput"),
         agentGroupSelect: document.getElementById("agentGroupSelect"),
         btnCancelAgentCreate: document.getElementById("btnCancelAgentCreate"),
+        textInputDialog: document.getElementById("textInputDialog"),
+        textInputForm: document.getElementById("textInputForm"),
+        textInputTitle: document.getElementById("textInputTitle"),
+        textInputLabel: document.getElementById("textInputLabel"),
+        textInputValue: document.getElementById("textInputValue"),
+        textInputCancelBtn: document.getElementById("textInputCancelBtn"),
+        textInputSubmitBtn: document.getElementById("textInputSubmitBtn"),
         groupContextMenu: document.getElementById("groupContextMenu"),
         groupContextEditNameBtn: document.getElementById("groupContextEditNameBtn"),
         groupContextDeleteBtn: document.getElementById("groupContextDeleteBtn"),
@@ -2813,12 +2834,7 @@
               event.stopPropagation();
               openAgentTabContextMenu(event.clientX, event.clientY, {
                 rename: () => {
-                  const rawName = window.prompt(
-                    "Rename section:",
-                    formatSectionLabel(sectionName) || sectionName
-                  );
-                  if (rawName === null) return;
-                  void renameAgentSection(agentMeta, detail, sectionName, rawName);
+                  void renameAgentSection(agentMeta, detail, sectionName);
                 },
                 remove: () => {
                   void deleteAgentSection(agentMeta, detail, sectionName);
@@ -4155,8 +4171,16 @@
         }
       }
 
-      async function renameAgentSection(agentMeta, detail, fromSection, nextLabelRaw) {
+      async function renameAgentSection(agentMeta, detail, fromSection) {
         if (!agentMeta || !detail) return;
+        const currentLabel = formatSectionLabel(fromSection) || fromSection;
+        const nextLabelRaw = await askTextInputDialog({
+          title: "Rename section",
+          label: "Section name",
+          initialValue: currentLabel,
+          submitLabel: "Rename",
+        });
+        if (nextLabelRaw === null) return;
         const nextLabel = String(nextLabelRaw || "").trim();
         if (!nextLabel) {
           setStatus("Section name is required", true);
@@ -4386,6 +4410,59 @@
           dom.choiceDialog.addEventListener("cancel", onCancel);
           dom.choiceDialog.addEventListener("close", onClose);
           dom.choiceDialog.showModal();
+        });
+      }
+
+      function askTextInputDialog({
+        title = "Rename",
+        label = "Name",
+        initialValue = "",
+        submitLabel = "Save",
+      } = {}) {
+        return new Promise((resolve) => {
+          dom.textInputTitle.textContent = title;
+          dom.textInputLabel.textContent = label;
+          dom.textInputSubmitBtn.textContent = submitLabel;
+          dom.textInputValue.value = String(initialValue || "");
+
+          let settled = false;
+          const settle = (value) => {
+            if (settled) return;
+            settled = true;
+            if (dom.textInputDialog.open) {
+              dom.textInputDialog.close();
+            }
+            cleanup();
+            resolve(value);
+          };
+
+          const onSubmit = (event) => {
+            event.preventDefault();
+            settle(dom.textInputValue.value);
+          };
+          const onCancelBtn = () => settle(null);
+          const onDialogCancel = (event) => {
+            event.preventDefault();
+            settle(null);
+          };
+          const onClose = () => settle(null);
+
+          const cleanup = () => {
+            dom.textInputForm.removeEventListener("submit", onSubmit);
+            dom.textInputCancelBtn.removeEventListener("click", onCancelBtn);
+            dom.textInputDialog.removeEventListener("cancel", onDialogCancel);
+            dom.textInputDialog.removeEventListener("close", onClose);
+          };
+
+          dom.textInputForm.addEventListener("submit", onSubmit);
+          dom.textInputCancelBtn.addEventListener("click", onCancelBtn);
+          dom.textInputDialog.addEventListener("cancel", onDialogCancel);
+          dom.textInputDialog.addEventListener("close", onClose);
+          dom.textInputDialog.showModal();
+          window.setTimeout(() => {
+            dom.textInputValue.focus();
+            dom.textInputValue.select();
+          }, 0);
         });
       }
 
@@ -4877,37 +4954,41 @@
           setStatus(`Cannot rename "${DEFAULT_GROUP_LABEL}"`, true);
           return;
         }
-
-        const previousValue = String(groupTarget.name || "").trim();
-        const rawName = window.prompt("Rename prompt group:", previousValue);
-        if (rawName === null) return;
-        const nextValue = String(rawName || "").trim();
-        if (!nextValue) {
-          setStatus("Group name is required", true);
-          return;
-        }
-        if (nextValue.toLowerCase() === previousValue.toLowerCase()) return;
-
-        const groups = getActiveGroups();
-        const targetIndex = groups.findIndex((item) => item.id === groupTarget.id);
-        if (targetIndex < 0) return;
-        const duplicate = groups.some(
-          (item) =>
-            item.id !== groupTarget.id &&
-            String(item.name || "").trim().toLowerCase() === nextValue.toLowerCase()
-        );
-        if (duplicate) {
-          setStatus("Group name already exists", true);
-          return;
-        }
-
-        const previousGroups = groups.map((item) => ({ ...item }));
-        const nextGroups = groups.map((item) =>
-          item.id === groupTarget.id ? { ...item, name: nextValue } : item
-        );
-        setActiveGroups(nextGroups);
-        render();
         void (async () => {
+          const previousValue = String(groupTarget.name || "").trim();
+          const rawName = await askTextInputDialog({
+            title: "Rename prompt group",
+            label: "Group name",
+            initialValue: previousValue,
+            submitLabel: "Rename",
+          });
+          if (rawName === null) return;
+          const nextValue = String(rawName || "").trim();
+          if (!nextValue) {
+            setStatus("Group name is required", true);
+            return;
+          }
+          if (nextValue.toLowerCase() === previousValue.toLowerCase()) return;
+
+          const groups = getActiveGroups();
+          const targetIndex = groups.findIndex((item) => item.id === groupTarget.id);
+          if (targetIndex < 0) return;
+          const duplicate = groups.some(
+            (item) =>
+              item.id !== groupTarget.id &&
+              String(item.name || "").trim().toLowerCase() === nextValue.toLowerCase()
+          );
+          if (duplicate) {
+            setStatus("Group name already exists", true);
+            return;
+          }
+
+          const previousGroups = groups.map((item) => ({ ...item }));
+          const nextGroups = groups.map((item) =>
+            item.id === groupTarget.id ? { ...item, name: nextValue } : item
+          );
+          setActiveGroups(nextGroups);
+          render();
           try {
             await saveToServer();
             setStatus(
@@ -4931,7 +5012,12 @@
         const previousValue = String(
           agentGroupTarget.label || getAgentGroupLabel(agentGroupTarget.key)
         ).trim();
-        const rawName = window.prompt("Rename agent group:", previousValue);
+        const rawName = await askTextInputDialog({
+          title: "Rename agent group",
+          label: "Group name",
+          initialValue: previousValue,
+          submitLabel: "Rename",
+        });
         if (rawName === null) return;
         const nextValue = String(rawName || "").trim();
         if (!nextValue) {
