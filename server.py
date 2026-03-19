@@ -9,6 +9,30 @@ app = Flask(__name__)
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 CONFIG_FILE = os.path.join(BASE_DIR, "launch-config.ini")
+CONFIG_EXAMPLE_FILE = os.path.join(BASE_DIR, "launch-config.example.ini")
+
+DEFAULT_CONFIG_CONTENT = """# Copy this file to launch-config.ini for local machine settings.
+# launch-config.ini is gitignored so each machine can set its own values.
+
+# Port the launcher waits for before opening browser.
+listen_port=5000
+
+# Preferred generic setup: scheme + host/IP (launcher builds URL).
+open_scheme=http
+open_host=127.0.0.1
+
+# JSON data file used by server.py.
+# Can be just a filename in the project folder (recommended),
+# or an absolute path if you want it elsewhere.
+data_file=prompt_library.json
+
+# Optional agents storage root used by server.py.
+# Defaults to ./agents when omitted.
+agents_root=agents
+
+# Comma-separated users shown in the app user dropdown.
+users=Default
+"""
 
 
 def read_simple_config(path):
@@ -26,6 +50,32 @@ def read_simple_config(path):
             key, value = line.split("=", 1)
             config[key.strip().lower()] = value.strip()
     return config
+
+
+def ensure_launch_config_exists():
+    if os.path.exists(CONFIG_FILE):
+        return
+
+    content = DEFAULT_CONFIG_CONTENT
+    if os.path.exists(CONFIG_EXAMPLE_FILE):
+        try:
+            with open(CONFIG_EXAMPLE_FILE, "r", encoding="utf-8") as f:
+                content = f.read()
+        except OSError:
+            content = DEFAULT_CONFIG_CONTENT
+
+    if not content.endswith("\n"):
+        content += "\n"
+
+    try:
+        with open(CONFIG_FILE, "w", encoding="utf-8") as f:
+            f.write(content)
+    except OSError:
+        # App can still run with in-memory defaults when config file is unavailable.
+        pass
+
+
+ensure_launch_config_exists()
 
 
 def resolve_data_file():

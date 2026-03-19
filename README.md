@@ -4,6 +4,26 @@ A lightweight, local-first workspace for organizing, editing, and reusing prompt
 
 This app helps you keep your favorite prompt building blocks in one place so you can quickly retrieve, edit, copy, and assemble them without relying on cloud storage or heavyweight tooling.
 
+## First clone: install and launch (Windows)
+
+1. Install Python 3.x.
+2. Install Flask:
+
+```powershell
+pip install flask
+```
+
+3. Start the app:
+   - Double-click `start-prompt-library.vbs`, or
+   - run `python server.py`
+4. Open `http://127.0.0.1:5000` (or your configured host/port).
+
+On first run, the app will create `launch-config.ini` with defaults if it does not exist.
+
+If you want to preconfigure settings before first launch, copy `launch-config.example.ini` to `launch-config.ini` and edit values (including `agents_root`) as needed.
+
+---
+
 ## What this is
 
 **LLM Prompt and Agent Library** is a self-hosted Flask web app for managing two kinds of reusable LLM assets:
@@ -63,6 +83,7 @@ Agents are stored on disk as folders containing Markdown files.
 
 - Create, view, edit, and delete prompts
 - Organize prompts into groups
+- Search prompts across all groups (search view clears when a group is selected)
 - Drag and drop prompts between groups
 - Reorder prompts
 - Expand/collapse prompt cards
@@ -77,6 +98,7 @@ Agents are stored on disk as folders containing Markdown files.
 - Create agents from the UI
 - Store agents as portable filesystem folders
 - Organize agents into groups
+- Search agents across all groups (search view clears when a group is selected)
 - Drag and drop agents between groups
 - Reorder agents
 - Expand/collapse agent cards
@@ -94,9 +116,10 @@ Agents are stored on disk as folders containing Markdown files.
 
 - Separate group systems for Prompts and Agents
 - Create groups from the UI
+- Rename groups from context menu (except default `ungrouped`)
 - Reorder groups
 - Delete groups from a context menu
-- On delete, move contained items to **No Group**
+- On delete, move contained items to **ungrouped**
 
 ---
 
@@ -155,6 +178,7 @@ Prompts and Agents have separate group lists.
 ### Main pane
 
 The main pane displays prompt cards or agent cards for the selected group.
+When search text is present, it shows matches across all groups for the active mode.
 
 The page uses normal browser scrolling, so long lists can extend naturally down the page.
 
@@ -202,28 +226,7 @@ Using a virtual environment is recommended, but not required.
 
 ## Quick start
 
-### Windows
-
-1. Copy `launch-config.example.ini` to `launch-config.ini`
-2. Edit `launch-config.ini` for your machine
-3. Start the app by either:
-
-   * double-clicking `start-prompt-library.vbs`
-   * or running:
-
-```powershell
-python server.py
-```
-
-4. Open the configured URL in your browser
-
-Example:
-
-```text
-http://127.0.0.1:5000
-```
-
----
+See **First clone: install and launch (Windows)** near the top of this README.
 
 ## Configuration
 
@@ -297,7 +300,6 @@ Examples of future work may include:
 
 * agent zip export
 * agent section rename/delete/reorder UX
-* agent group rename UX
 * additional polish around transport/import workflows
 
 ---
@@ -322,4 +324,11 @@ It gives you:
 * copy/construct flows
 * organized group-based navigation
 * local ownership of your prompt assets
+
+---
+
+## License
+
+Copyright (c) 2026 John Theisen
+This project is licensed under the MIT License. See the LICENSE file for details.
 

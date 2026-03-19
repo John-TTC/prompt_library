@@ -729,7 +729,7 @@
     <div class="header-spacer" aria-hidden="true"></div>
     <div class="header-title-wrap">
       <h1 class="header-title">LLM Prompt and Agent Library</h1>
-      <p class="header-subtitle">Organized store of reusable prompts and agent building blocks</p>
+      <p class="header-subtitle">An organized store of reusable prompts and agent building blocks</p>
     </div>
     <div class="header-actions">
       <label class="user-select-label" for="userSelect">Active user</label>
@@ -739,7 +739,7 @@
 
   <div class="status">
     <div class="status-description">
-      Allows you to save, organize, edit, and quickly reuse prompts and structured agent components so you can keep context consistent across LLM sessions
+      This tool allows you to save, organize, edit, and quickly reuse prompts and structured agent components so you can keep your context consistent across LLM sessions
     </div>
   </div>
 
@@ -897,6 +897,7 @@
 
       const DEFAULT_GROUP_ID = "group-unsorted";
       const AGENT_GROUP_UNSORTED_ID = "agent-group-unsorted";
+      const DEFAULT_GROUP_LABEL = "ungrouped";
       const PROFILE_STORAGE_KEY = "promptLibrary.activeProfile";
       const GROUP_STORAGE_KEY = "promptLibrary.activeGroups";
       const AGENT_GROUP_STORAGE_KEY = "promptLibrary.activeAgentGroups";
@@ -1170,13 +1171,13 @@
         if (!byKey.has(AGENT_GROUP_UNSORTED_ID)) {
           byKey.set(AGENT_GROUP_UNSORTED_ID, {
             key: AGENT_GROUP_UNSORTED_ID,
-            label: "No Group",
+            label: DEFAULT_GROUP_LABEL,
             order: byKey.size,
             createdAt: "",
           });
         }
         const unsortedMeta = byKey.get(AGENT_GROUP_UNSORTED_ID);
-        unsortedMeta.label = "No Group";
+        unsortedMeta.label = DEFAULT_GROUP_LABEL;
         byKey.set(AGENT_GROUP_UNSORTED_ID, unsortedMeta);
         const groups = Array.from(byKey.values()).sort(
           (a, b) => {
@@ -1345,7 +1346,7 @@
       }
 
       function getAgentGroupLabel(groupKey) {
-        if (groupKey === AGENT_GROUP_UNSORTED_ID) return "No Group";
+        if (groupKey === AGENT_GROUP_UNSORTED_ID) return DEFAULT_GROUP_LABEL;
         const meta = getAgentGroupMetaByKey(groupKey);
         return meta ? meta.label : groupKey;
       }
@@ -1570,14 +1571,14 @@
       function ensureDefaultGroup(groups) {
         const existing = groups.find((g) => g.id === DEFAULT_GROUP_ID);
         if (existing) {
-          existing.name = "No Group";
+          existing.name = DEFAULT_GROUP_LABEL;
           return groups;
         }
         return [
           ...groups,
           {
             id: DEFAULT_GROUP_ID,
-            name: "No Group",
+            name: DEFAULT_GROUP_LABEL,
             createdAt: nowIso(),
             order: groups.length,
           },
@@ -1665,7 +1666,7 @@
 
       function getGroupLabel(groupId) {
         const group = getGroupById(groupId);
-        return group ? group.name : "No Group";
+        return group ? group.name : DEFAULT_GROUP_LABEL;
       }
 
       function getActiveGroupLabel() {
@@ -4097,7 +4098,7 @@
           setActiveAgentGroupId(AGENT_GROUP_UNSORTED_ID);
           saveActiveAgentGroupsLocal();
           render();
-          setStatus('Using existing group "No Group"');
+          setStatus(`Using existing group "${DEFAULT_GROUP_LABEL}"`);
           return;
         }
 
@@ -4146,13 +4147,13 @@
       async function deleteAgentGroup(agentGroup) {
         if (!agentGroup || !agentGroup.key) return;
         if (agentGroup.key === AGENT_GROUP_UNSORTED_ID) {
-          setStatus('Cannot delete "No Group"', true);
+          setStatus(`Cannot delete "${DEFAULT_GROUP_LABEL}"`, true);
           return;
         }
         const choice = await askChoiceDialog({
           title: "Delete this agent group?",
           message:
-            'All agents in this group will be moved to "No Group".',
+            `All agents in this group will be moved to "${DEFAULT_GROUP_LABEL}".`,
           primaryLabel: "Delete Group",
           secondaryLabel: "Cancel",
         });
@@ -4195,7 +4196,7 @@
         if (!groupTarget || !groupTarget.id) return;
         if (!(groupNameElement instanceof HTMLElement)) return;
         if (groupTarget.id === DEFAULT_GROUP_ID) {
-          setStatus('Cannot rename "No Group"', true);
+          setStatus(`Cannot rename "${DEFAULT_GROUP_LABEL}"`, true);
           return;
         }
 
@@ -4253,7 +4254,7 @@
         if (!agentGroupTarget || !agentGroupTarget.key) return;
         if (!(groupNameElement instanceof HTMLElement)) return;
         if (agentGroupTarget.key === AGENT_GROUP_UNSORTED_ID) {
-          setStatus('Cannot rename "No Group"', true);
+          setStatus(`Cannot rename "${DEFAULT_GROUP_LABEL}"`, true);
           return;
         }
 
@@ -4319,13 +4320,13 @@
       async function deletePromptGroup(groupTarget) {
         if (!groupTarget || !groupTarget.groupId) return;
         if (groupTarget.groupId === DEFAULT_GROUP_ID) {
-          setStatus('Cannot delete "No Group"', true);
+          setStatus(`Cannot delete "${DEFAULT_GROUP_LABEL}"`, true);
           return;
         }
         const choice = await askChoiceDialog({
           title: "Delete this prompt group?",
           message:
-            'All prompts in this group will be moved to "No Group".',
+            `All prompts in this group will be moved to "${DEFAULT_GROUP_LABEL}".`,
           primaryLabel: "Delete Group",
           secondaryLabel: "Cancel",
         });

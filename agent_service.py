@@ -7,6 +7,7 @@ from pathlib import Path
 
 DEFAULT_SECTION_ORDER = ["role", "rules", "process", "output"]
 DEFAULT_AGENT_GROUP = "agent-group-unsorted"
+DEFAULT_AGENT_GROUP_LABEL = "ungrouped"
 AGENT_GROUPS_FILE = "agent-groups.json"
 GROUPS_SCHEMA_VERSION = 1
 
@@ -174,13 +175,13 @@ def _sync_agent_groups(root, user):
     if DEFAULT_AGENT_GROUP not in by_key:
         by_key[DEFAULT_AGENT_GROUP] = {
             "key": DEFAULT_AGENT_GROUP,
-            "label": "No Group",
+            "label": DEFAULT_AGENT_GROUP_LABEL,
             "order": len(by_key),
             "createdAt": _now_iso(),
         }
         changed = True
-    elif by_key[DEFAULT_AGENT_GROUP].get("label") != "No Group":
-        by_key[DEFAULT_AGENT_GROUP]["label"] = "No Group"
+    elif by_key[DEFAULT_AGENT_GROUP].get("label") != DEFAULT_AGENT_GROUP_LABEL:
+        by_key[DEFAULT_AGENT_GROUP]["label"] = DEFAULT_AGENT_GROUP_LABEL
         changed = True
 
     discovered = sorted(_collect_group_dirs(user_root))
@@ -417,7 +418,7 @@ def rename_agent_group(agents_root, user, group, label):
     user_root, _ = _user_root(root, user)
     group_norm = _normalize_group_name(group)
     if group_norm == DEFAULT_AGENT_GROUP:
-        raise ValueError('Cannot rename "No Group"')
+        raise ValueError(f'Cannot rename "{DEFAULT_AGENT_GROUP_LABEL}"')
 
     next_label = str(label).strip()
     if not next_label:
@@ -661,7 +662,7 @@ def delete_agent_group(agents_root, user, group):
     user_root, _ = _user_root(root, user)
     group_norm = _normalize_group_name(group)
     if group_norm == DEFAULT_AGENT_GROUP:
-        raise ValueError("Cannot delete No Group")
+        raise ValueError(f'Cannot delete "{DEFAULT_AGENT_GROUP_LABEL}"')
 
     groups = _sync_agent_groups(root, user)
     group_entry = next((item for item in groups if item["key"] == group_norm), None)
